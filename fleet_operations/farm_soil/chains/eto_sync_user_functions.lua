@@ -6,10 +6,10 @@
 -- and spatial readings.
 --
 -- Gates (evaluated each tick, every retry_s):
---   1. already-succeeded today                  -> idle ok
---   2. pre-window (Pacific hour < hour_pacific) -> idle ok
---   3. CIMIS station+spatial both present       -> idle (or 17:00 failure)
---   4. perform apply                            -> success or 17:00 failure
+--   1. already-succeeded today                       -> idle ok
+--   2. pre-window (before hour_pacific:minute_pacific) -> idle ok
+--   3. CIMIS station+spatial both present            -> idle (or failure_hour notify)
+--   4. perform apply                                 -> success or failure_hour notify
 --
 -- Math, per row in eto_update_table:
 --   delta   = cimis.station.value - cimis.spatial.value          (one daily delta)
@@ -23,7 +23,7 @@
 -- `fleet/notify/digest/daily` topic. notification_service POSTs it.
 --   * success    "ETO sync ok — N rows, K capped (cap=0.20), delta=+0.0234"
 --   * failure    "ETO sync FAILED — <reason>"  (sent at-most-once per day,
---                                                only at-or-after 17:00 PT)
+--                                                only at-or-after failure_hour_pacific PT)
 --
 -- Idempotency: two disk markers under ${FLEET_DATA_DIR}/daily_markers/
 --   farm_soil_<inst>_eto_sync.txt           — today's date when success.
@@ -128,6 +128,7 @@ M.one_shot.ETO_SYNC_TICK = function(handle, _node)
     local cfg      = (cs and cs.eto_sync) or {}
     local irr      = (cs and cs.irrigation) or {}
     local hour_p   = cfg.hour_pacific or 14
+    local min_p    = cfg.minute_pacific or 0
     local retry_s  = cfg.retry_s or DEFAULT_RETRY_S
     local kb_label = "eto_sync"
 
@@ -147,10 +148,10 @@ M.one_shot.ETO_SYNC_TICK = function(handle, _node)
     end
 
     -- Gate 2: pre-window -> idle, no failure check (we haven't even tried).
-    if p.hour < hour_p then
+    if (p.hour * 60 + p.minute) < (hour_p * 60 + min_p) then
         app_heartbeat.stamp(handle, kb_label, "ok",
-            string.format("pre-window (now %02d:%02d %s, opens %02d:00)",
-                p.hour, p.minute, tz, hour_p), retry_s)
+            string.format("pre-window (now %02d:%02d %s, opens %02d:%02d)",
+                p.hour, p.minute, tz, hour_p, min_p), retry_s)
         return
     end
 
@@ -170,7 +171,7 @@ M.one_shot.ETO_SYNC_TICK = function(handle, _node)
     end
 
     -- Gate 4: read+write. Either step can fail; either failure triggers
-    -- the 17:00 notification path.
+    -- the failure_hour_pacific notification path.
     local host      = irr.host
     local account   = os.getenv("IRRIGATION_ACCOUNT")
     local password  = os.getenv("IRRIGATION_PASSWORD")

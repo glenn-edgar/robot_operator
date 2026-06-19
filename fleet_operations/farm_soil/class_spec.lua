@@ -153,11 +153,12 @@ M.irrigation = {
 -- delta, clamped to [floor, cap]. retry_s ticks; the actual once-per-day
 -- gate is evaluated inside ETO_SYNC_TICK. If we haven't succeeded by
 -- failure_hour_pacific, a single Discord failure notification fires for
--- the day (failure_hour_pacific=17 = 5pm Pacific). See [[cimis-skill-2026-05-22]]
+-- the day (failure_hour_pacific=20 = 8pm Pacific). See [[cimis-skill-2026-05-22]]
 -- for the daily-gate pattern this mirrors.
 M.eto_sync = {
-    hour_pacific          = 14,    -- window opens 14:00 PT (2pm)
-    failure_hour_pacific  = 17,    -- discord-failure deadline = 17:00 PT
+    hour_pacific          = 17,    -- window opens 17:30 PT (5:30pm)
+    minute_pacific        = 30,    -- ...minute component of the window open
+    failure_hour_pacific  = 20,    -- discord-failure deadline = 20:00 PT
     retry_s               = 900,   -- 15 min retry cadence
     cap                   = 0.18,  -- per-row upper clamp
     floor                 = 0.0,   -- per-row lower clamp
