@@ -36,9 +36,17 @@ export LUA_PATH="$VENDOR_LUA/?.lua;$SCRIPT_DIR/lib/?.lua;$SCRIPT_DIR/?.lua;$SCRI
 
 # TODO Pi/container deploy: replace bench LD_LIBRARY_PATH with vendor/lib-*.
 if [ -z "${LD_LIBRARY_PATH:-}" ]; then
-    DEFAULT_ZENOH_LIB=$HOME/knowledge_base_assembly/luajit_programs_and_containers/building_blocks/knowledge_base/zenoh
-    DEFAULT_PICO_LIB=$HOME/src/zenoh-pico/lib-combined
-    export LD_LIBRARY_PATH="$DEFAULT_ZENOH_LIB:$DEFAULT_PICO_LIB"
+    # Vendored transport .so (committed; rebuild via ./build_libs.sh). Self-
+    # contained: no ~/src or ~/knowledge_base_assembly. Falls back to the legacy
+    # external dirs only if the vendored libs aren't present.
+    VENDORED_LIB="$REPO_ROOT/packaging/build_assets/lib"
+    if [ -f "$VENDORED_LIB/libzenohpico.so" ]; then
+        export LD_LIBRARY_PATH="$VENDORED_LIB"
+    else
+        DEFAULT_ZENOH_LIB=$HOME/knowledge_base_assembly/luajit_programs_and_containers/building_blocks/knowledge_base/zenoh
+        DEFAULT_PICO_LIB=$HOME/src/zenoh-pico/lib-combined
+        export LD_LIBRARY_PATH="$DEFAULT_ZENOH_LIB:$DEFAULT_PICO_LIB"
+    fi
 fi
 
 exec luajit "$SCRIPT_DIR/main.lua" "$@"
