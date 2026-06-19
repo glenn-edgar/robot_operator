@@ -1,0 +1,16 @@
+site_name: fleet_design
+site_description: >
+  Zenoh-internal robot framework — chain_tree LuaJIT engine, encapsulated
+  per-robot KBs, single-container fleet packaging. Production deploys on
+  Raspberry Pi 4 from a Docker Hub image.
+docs_dir: docs
+theme:
+  name: material
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Container runtime: container_runtime.md
+  - Deploy guide (WSL + Pi): deploy.md
+  - Robot classes: robots.md
+  - Operations: operations.md

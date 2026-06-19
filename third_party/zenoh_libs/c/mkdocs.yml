@@ -1,0 +1,7 @@
+site_name: Zenoh C Client Libraries
+docs_dir: docs
+nav:
+  - Overview: README_zenoh.md
+  - Token (FNV1a hash): README_zenoh_token.md
+  - PubSub: README_zenoh_pubsub.md
+  - RPC: README_zenoh_rpc.md

@@ -1,0 +1,23 @@
+// zenohd.json5 — minimal router config for the single-container fleet.
+//
+// One TCP listener on 7447 (the per-process run.sh defaults all dial
+// tcp/127.0.0.1:7447). Mode is router so the in-container peers can rely
+// on multicast/scout-free discovery via this single endpoint.
+//
+// --network=host means 127.0.0.1 inside the container == 127.0.0.1 on the
+// host, so the gateway dashboard / other tools on the host can reach the
+// router on 127.0.0.1:7447 too (useful for diagnostic tooling).
+{
+  mode: "router",
+  listen: {
+    endpoints: ["tcp/0.0.0.0:7447"],
+  },
+  scouting: {
+    multicast: {
+      enabled: false,
+    },
+    gossip: {
+      enabled: true,
+    },
+  },
+}

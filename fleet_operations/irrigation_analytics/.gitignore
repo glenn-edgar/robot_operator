@@ -1,0 +1,5 @@
+identity/state.json
+secrets/*.env
+!secrets/*.env.example
+chains/connection.json
+var/

@@ -1,0 +1,13 @@
+site_name: irrigation_analytics
+site_description: >
+  Per-run analytics + daily resistance-trend monitoring for the LaCima
+  irrigation controller. KB1 live monitor with autonomous skip authority;
+  KB2 event-driven post-run + nightly resistance analyzer.
+
+docs_dir: docs
+
+theme:
+  name: material
+
+nav:
+  - Solenoid failure research: README.md

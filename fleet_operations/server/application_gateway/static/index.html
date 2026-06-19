@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>fleet_design dashboard</title>
+<style>
+:root {
+    --bg: #1a1d22; --panel: #23272e; --text: #d6d6d6; --muted: #8a8a8a;
+    --accent: #4fc3f7; --ok: #5cb85c; --warn: #f0ad4e; --bad: #d9534f;
+    --border: #353a42;
+}
+* { box-sizing: border-box; }
+body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+}
+header {
+    background: var(--panel); padding: 12px 20px;
+    border-bottom: 1px solid var(--border); display: flex;
+    align-items: center; gap: 16px;
+}
+header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+header .right { margin-left: auto; color: var(--muted); font-size: 12px; }
+button {
+    background: var(--accent); color: #000; border: 0; padding: 4px 10px;
+    border-radius: 3px; cursor: pointer; font-weight: 500;
+}
+button:hover { filter: brightness(1.1); }
+main { padding: 16px 20px; }
+.robot {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px; margin-bottom: 12px; overflow: hidden;
+}
+.robot-header {
+    padding: 10px 14px; display: flex; align-items: center; gap: 12px;
+    cursor: pointer;
+}
+.robot-header:hover { background: rgba(255,255,255,0.02); }
+.robot-title { font-weight: 600; font-size: 15px; }
+.robot-sub { color: var(--muted); font-size: 12px; }
+.dot {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--muted);
+}
+.dot.ok { background: var(--ok); }
+.dot.degraded { background: var(--warn); }
+.dot.offline, .dot.bad { background: var(--bad); }
+.robot-body {
+    padding: 8px 14px 14px 14px; border-top: 1px solid var(--border);
+    display: none;
+}
+.robot-body.open { display: block; }
+.leaves { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.leaf {
+    background: rgba(0,0,0,0.2); padding: 6px 10px; border-radius: 3px;
+    cursor: pointer; display: flex; justify-content: space-between;
+    align-items: center;
+}
+.leaf:hover { background: rgba(255,255,255,0.05); }
+.leaf .kind {
+    font-size: 11px; color: var(--muted); text-transform: uppercase;
+}
+.detail {
+    margin-top: 12px; padding: 10px 14px; background: rgba(0,0,0,0.25);
+    border-radius: 3px; max-height: 480px; overflow: auto;
+}
+.detail h4 {
+    margin: 0 0 8px 0; font-size: 13px; color: var(--accent);
+    font-weight: 600;
+}
+.detail .value-block {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+    white-space: pre-wrap; word-break: break-all; color: #b8d4e0;
+}
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td {
+    text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border);
+}
+th { color: var(--muted); font-weight: 500; }
+td.num { text-align: right; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.muted { color: var(--muted); }
+.err { color: var(--bad); }
+.pager { margin-top: 8px; display: flex; gap: 8px; align-items: center; }
+.pager button { background: #2c3138; color: var(--text); }
+.chart {
+    margin-bottom: 10px; padding: 6px 8px; background: rgba(0,0,0,0.2);
+    border-radius: 3px;
+}
+.chart .chart-controls {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px;
+    align-items: center; font-size: 12px;
+}
+.chart .chart-controls .label { color: var(--muted); margin-right: 4px; }
+.chart .chart-controls button {
+    background: #2c3138; color: var(--text); padding: 2px 8px;
+    font-size: 11px; border-radius: 2px;
+}
+.chart .chart-controls button.active { background: var(--accent); color: #000; }
+.chart svg { display: block; width: 100%; height: 180px; }
+.chart .ax { stroke: var(--border); stroke-width: 1; }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.chart .dot { fill: var(--accent); }
+.chart .axlbl { fill: var(--muted); font-size: 10px;
+                font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+</style>
+</head>
+<body>
+<header>
+    <h1>fleet_design</h1>
+    <button id="refresh">refresh</button>
+    <span class="right" id="status">loading…</span>
+</header>
+<main id="root"></main>
+
+<script>
+const root   = document.getElementById("root");
+const status = document.getElementById("status");
+
+const state = {
+    robots: [],         // [{kb_name, class, instance, leaf_count}]
+    leavesByKb: {},     // kb_name -> [{path, kind, ...}]
+    heartbeatByKb: {},  // kb_name -> heartbeat payload (cached by loadRobots)
+    open: new Set(),    // kb_name set of expanded cards
+    detail: {},         // kb_name -> {path, kind, html}
+    chartMetric: {},    // "<kb>|<leaf>" -> picked metric path (sticky across renders)
+};
+
+const api = (p) => fetch(p).then(async r => {
+    const j = await r.json().catch(() => ({ok: false, error: {code: "decode", msg: r.statusText}}));
+    if (!j.ok) throw new Error(j.error ? `${j.error.code}: ${j.error.msg}` : "request failed");
+    return j;
+});
+
+function fmtTs(ts) {
+    if (ts == null) return "—";
+    if (typeof ts === "number") {
+        return new Date(ts * 1000).toISOString().replace("T", " ").substring(0, 19) + "Z";
+    }
+    return String(ts);
+}
+
+function fmtAppsMap(apps) {
+    if (!apps || typeof apps !== "object") return "—";
+    const parts = Object.entries(apps).map(([k, v]) =>
+        `${k}=${v && (v.health || v.state) || "?"}`);
+    return parts.join(", ");
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c =>
+        ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+}
+
+// Find the *natural* sample timestamp embedded in a stream value, falling
+// back to null if the payload doesn't carry one. `recorded_at` on the
+// envelope is the DB insertion time (all within seconds when persistence
+// catches up after a restart) — useless as a time axis.
+function naturalTs(value) {
+    if (!value || typeof value !== "object") return null;
+    // TTN / moisture: nested under entry.
+    if (value.entry && typeof value.entry === "object") {
+        if (typeof value.entry.received_at === "string") return value.entry.received_at;
+        if (typeof value.entry.time === "string") return value.entry.time;
+    }
+    // CIMIS: date (+ optional time) at the top level.
+    if (typeof value.date === "string") {
+        return value.date + (typeof value.time === "string" ? "T" + value.time : "T00:00:00Z");
+    }
+    // Generic.
+    if (typeof value.ts === "string" || typeof value.ts === "number") return String(value.ts);
+    if (typeof value.timestamp === "string") return value.timestamp;
+    return null;
+}
+
+// Walk an object recursively, returning {path: number} for every numeric leaf.
+// path is a dotted accessor like `entry.measurements.moisture`.
+function flattenNumerics(obj, prefix, out) {
+    out = out || {};
+    if (obj == null) return out;
+    if (typeof obj === "number") {
+        if (Number.isFinite(obj)) out[prefix || "value"] = obj;
+        return out;
+    }
+    if (typeof obj !== "object") return out;
+    for (const k of Object.keys(obj)) {
+        const p = prefix ? prefix + "." + k : k;
+        flattenNumerics(obj[k], p, out);
+    }
+    return out;
+}
+
+// Build {[metricPath]: [{id, ts, v}]} from a stream rows array.
+// `ts` is the *natural* sample timestamp pulled from value when present;
+// rows without one are sorted by id (insertion order) and labelled with
+// recorded_at. Sort by natural timestamp asc when available so the chart
+// renders chronologically regardless of fetch order.
+function metricsFromRows(rows) {
+    const annotated = rows.map(r => ({
+        id: r.id,
+        ts: naturalTs(r.value) || r.recorded_at,
+        natural: naturalTs(r.value) != null,
+        value: r.value,
+    }));
+    annotated.sort((a, b) => {
+        if (a.natural && b.natural) return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0;
+        return a.id - b.id;
+    });
+    const series = {};
+    for (const r of annotated) {
+        const flat = flattenNumerics(r.value, "");
+        for (const k of Object.keys(flat)) {
+            (series[k] = series[k] || []).push({ id: r.id, ts: r.ts, v: flat[k] });
+        }
+    }
+    return series;
+}
+
+// Render an SVG line chart for one series. Returns SVG string.
+function svgChart(points, label) {
+    // viewBox W must match the natural drawing aspect we want filled — at
+    // 1200×180 the chart fills typical desktop panels (~1200 px wide content
+    // area) instead of being center-clamped at 520 px by preserveAspectRatio.
+    const W = 1200, H = 180, PAD_L = 44, PAD_R = 10, PAD_T = 10, PAD_B = 22;
+    if (points.length < 2) {
+        return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+            <text x="${W/2}" y="${H/2}" class="axlbl" text-anchor="middle">
+                need ≥2 points (got ${points.length})</text></svg>`;
+    }
+    const ys = points.map(p => p.v);
+    let yMin = Math.min(...ys), yMax = Math.max(...ys);
+    if (yMin === yMax) { yMin -= 1; yMax += 1; }
+    const pad = (yMax - yMin) * 0.08;
+    yMin -= pad; yMax += pad;
+    const xOf = i => PAD_L + (i * (W - PAD_L - PAD_R)) / (points.length - 1);
+    const yOf = v => PAD_T + ((yMax - v) * (H - PAD_T - PAD_B)) / (yMax - yMin);
+
+    const path = points.map((p, i) =>
+        (i === 0 ? "M" : "L") + xOf(i).toFixed(1) + "," + yOf(p.v).toFixed(1)
+    ).join(" ");
+    const dots = points.map((p, i) =>
+        `<circle class="dot" cx="${xOf(i).toFixed(1)}" cy="${yOf(p.v).toFixed(1)}" r="2.5">
+           <title>${escapeHtml(p.ts)}\n${label}=${p.v}</title></circle>`
+    ).join("");
+    const axY = [yMin, (yMin + yMax) / 2, yMax].map((v, i) => {
+        const y = yOf(v);
+        return `<line class="ax" x1="${PAD_L}" x2="${W - PAD_R}" y1="${y}" y2="${y}"/>
+                <text class="axlbl" x="${PAD_L - 4}" y="${y + 3}" text-anchor="end">${v.toFixed(3)}</text>`;
+    }).join("");
+    const firstTs = points[0].ts, lastTs = points[points.length - 1].ts;
+    const axX = `
+        <text class="axlbl" x="${PAD_L}" y="${H - 4}" text-anchor="start">${escapeHtml(firstTs)}</text>
+        <text class="axlbl" x="${W - PAD_R}" y="${H - 4}" text-anchor="end">${escapeHtml(lastTs)}</text>
+    `;
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+        ${axY}<path class="line" d="${path}"/>${dots}${axX}</svg>`;
+}
+
+// Hide radio/link metadata + counters from the metric switcher — they're
+// numeric but operationally noise. A path is hidden if any segment matches
+// the noise list. Easy to extend per new schema.
+const METRIC_NOISE_SEGMENTS = new Set([
+    "link", "f_cnt",
+    "rssi", "channel_rssi", "snr",
+    "bandwidth", "spreading_factor", "coding_rate",
+    "airtime_s", "gateway_count", "frequency", "battery",
+]);
+function isUsefulMetric(path) {
+    for (const seg of path.split(".")) {
+        if (METRIC_NOISE_SEGMENTS.has(seg)) return false;
+    }
+    return true;
+}
+
+// Pick the default metric to chart from a set of metric paths.
+function pickDefaultMetric(metricPaths) {
+    const priority = ["value", "entry.measurements.moisture",
+                      "entry.measurements.soil_temp",
+                      "entry.measurements.ec",
+                      "total_gallons", "total_hcf"];
+    for (const p of priority) if (metricPaths.includes(p)) return p;
+    return metricPaths[0];
+}
+
+// Render charts for an `hourly` array embedded in a status value. Generic:
+// any value with an array of objects under `hourly` whose entries have an
+// hour-like key (h/hour/t/time) and one-or-more numeric fields gets one
+// SVG line chart per numeric field. Currently used by rancho_water's
+// usage/latest; any future robot publishing per-hour data benefits for free.
+function hourlyCharts(value) {
+    const hourly = value && value.hourly;
+    if (!Array.isArray(hourly) || hourly.length < 2) return "";
+    const sample = hourly[0];
+    if (typeof sample !== "object" || sample === null) return "";
+    const hourKey = ["h", "hour", "t", "time"].find(k => k in sample);
+    if (!hourKey) return "";
+    const metrics = Object.keys(sample).filter(k =>
+        k !== hourKey && typeof sample[k] === "number"
+        && Number.isFinite(sample[k]));
+    if (metrics.length === 0) return "";
+    return metrics.map(m => {
+        const points = hourly.map(row => ({
+            ts: String(row[hourKey]),
+            v: row[m],
+        }));
+        return `<div class="chart">
+            <div class="chart-controls"><span class="label">${escapeHtml(m)} per hour</span></div>
+            ${svgChart(points, m)}
+        </div>`;
+    }).join("");
+}
+
+async function loadRobots() {
+    status.textContent = "loading robots…";
+    try {
+        const j = await api("/api/robots");
+        state.robots = j.data;
+        // Re-fetch leaves + heartbeat for every robot in PARALLEL so the
+        // periodic refresh (10s cadence) doesn't serialize ~100ms per call.
+        // We always refetch leaves because the topology can change as
+        // persistence catches up (initial bootstrap is racy); we cache
+        // heartbeat here so render() doesn't need to await anything and
+        // the leaf-detail click path renders instantly. Cost per refresh
+        // = 2 calls per robot, fired concurrently.
+        await Promise.all(state.robots.flatMap(kb => [
+            api(`/api/robots/${kb.class}/${kb.instance}/leaves`)
+                .then(lj => { state.leavesByKb[kb.kb_name] = lj.data; })
+                .catch(() => { state.leavesByKb[kb.kb_name] = state.leavesByKb[kb.kb_name] || []; }),
+            api(`/api/robots/${kb.class}/${kb.instance}/latest?path=heartbeat`)
+                .then(hj => { state.heartbeatByKb[kb.kb_name] = hj.data; })
+                .catch(() => { /* keep prior heartbeat */ }),
+        ]));
+        status.textContent = `refreshed ${new Date().toLocaleTimeString()}`;
+        render();
+    } catch (e) {
+        status.textContent = "error: " + e.message;
+        status.classList.add("err");
+    }
+}
+
+async function loadDetail(kb, leaf) {
+    const params = new URLSearchParams({ path: leaf.path });
+    // Show a placeholder IMMEDIATELY so the click feels responsive. For
+    // chunky streams (e.g. moisture, ~5 rows/page × 40 pages) the full pull
+    // can take 4-5 s on its own; without this the dashboard sat frozen.
+    state.detail[kb.kb_name] = { path: leaf.path, kind: leaf.kind,
+        html: `<h4>${escapeHtml(leaf.path)} (${leaf.kind})</h4><div class="muted">loading…</div>` };
+    render();
+
+    let html;
+    try {
+        if (leaf.kind === "status") {
+            const j = await api(`/api/robots/${kb.class}/${kb.instance}/latest?${params}`);
+            html = `<h4>${escapeHtml(leaf.path)} (status)</h4>` +
+                   hourlyCharts(j.data) +
+                   `<div class="value-block">${escapeHtml(JSON.stringify(j.data, null, 2))}</div>`;
+        } else {
+            // Walk the persistence stream RPC cursor: each page is capped
+            // at 4 KB on the server side so a single call typically returns
+            // only 3-6 rows for chunky JSON payloads (e.g. moisture readings
+            // with full TTN gateway metadata). Fetch up to MAX_PAGES so the
+            // chart has enough points to draw a useful history. 200 rows
+            // covers a 7-day window at the LaCima hourly cadence
+            // (7 × 24 = 168 + headroom for missed uplinks / partial-day edges).
+            // The intra-loop render() shows a per-page row counter so the
+            // user sees progress instead of a 4-5 s freeze.
+            const TARGET_ROWS = 200, MAX_PAGES = 60;
+            params.set("limit", String(TARGET_ROWS));
+            params.set("order", "desc");
+            let rows = [], page, nextPageAtStop;
+            for (let i = 0; i < MAX_PAGES; ++i) {
+                const pp = new URLSearchParams(params);
+                if (page) pp.set("page", page);
+                const j = await api(`/api/robots/${kb.class}/${kb.instance}/stream?${pp}`);
+                const got = j.data || [];
+                rows = rows.concat(got);
+                page = j.next_page;
+                nextPageAtStop = page;     // cursor preserved for the "more rows available" footer
+                if (!page || rows.length >= TARGET_ROWS) break;
+                // Cheap progress tick — render() is synchronous now (no
+                // network in the path) so the DOM update is sub-ms.
+                state.detail[kb.kb_name].html =
+                    `<h4>${escapeHtml(leaf.path)} (stream)</h4>` +
+                    `<div class="muted">loading… ${rows.length} rows so far</div>`;
+                render();
+            }
+
+            // Chart: extract every numeric leaf path across rows, hide
+            // radio/counter noise, render the first useful one as a line
+            // chart with buttons to switch metric.
+            const series = metricsFromRows(rows);
+            const metricPaths = Object.keys(series)
+                .filter(isUsefulMetric)
+                .sort();
+            const prevPick = state.chartMetric && state.chartMetric[kb.kb_name + "|" + leaf.path];
+            const pick = (prevPick && metricPaths.includes(prevPick))
+                       ? prevPick : pickDefaultMetric(metricPaths);
+            const chartHtml = metricPaths.length === 0
+                ? ""
+                : `<div class="chart">
+                    <div class="chart-controls">
+                      <span class="label">metric:</span>
+                      ${metricPaths.map(m => `<button data-metric="${escapeHtml(m)}" data-kb="${kb.kb_name}" data-leaf="${escapeHtml(leaf.path)}" class="${m===pick?"active":""}">${escapeHtml(m)}</button>`).join("")}
+                    </div>
+                    ${svgChart(series[pick] || [], pick)}
+                   </div>`;
+
+            // Table: one received_at column + the useful numeric columns
+            // (entry.measurements.*, top-level numerics from the chart's
+            // metric list).  Sort newest-first by natural-ts when available.
+            const tableRows = [...rows].map(r => ({
+                ...r,
+                received_at: naturalTs(r.value),
+                natural:     naturalTs(r.value) != null,
+                flat:        flattenNumerics(r.value, ""),
+            })).sort((a, b) => {
+                if (a.natural && b.natural)
+                    return a.received_at < b.received_at ? 1 : a.received_at > b.received_at ? -1 : 0;
+                return b.id - a.id;
+            });
+            // Columns = the union of useful flat paths across rows, so a
+            // row missing a metric still renders an empty cell. Header
+            // labels strip the common `entry.measurements.` prefix so the
+            // moisture/soil_temp/ec columns aren't 25 chars wide each.
+            const colSet = new Set();
+            for (const r of tableRows) {
+                for (const k of Object.keys(r.flat)) {
+                    if (isUsefulMetric(k)) colSet.add(k);
+                }
+            }
+            const cols = [...colSet].sort();
+            const shortHeader = p => p.replace(/^entry\.measurements\./, "");
+            const head = `<tr><th>id</th><th>received_at</th>` +
+                cols.map(c => `<th>${escapeHtml(shortHeader(c))}</th>`).join("") + `</tr>`;
+            const body = tableRows.map(r => {
+                const cells = cols.map(c => {
+                    const v = r.flat[c];
+                    return `<td class="num">${v == null ? "" : escapeHtml(String(v))}</td>`;
+                }).join("");
+                const tsCell = r.natural
+                    ? escapeHtml(r.received_at)
+                    : `<span class="muted">${escapeHtml(r.recorded_at)} (ingest)</span>`;
+                return `<tr><td class="num">${r.id}</td><td>${tsCell}</td>${cells}</tr>`;
+            }).join("");
+            const nextPg = nextPageAtStop
+                ? `<div class="pager"><span class="muted">more rows available (cursor=${escapeHtml(nextPageAtStop)})</span></div>`
+                : `<div class="pager"><span class="muted">end of stream</span></div>`;
+            html = `<h4>${escapeHtml(leaf.path)} (stream, last ${rows.length})</h4>` +
+                   chartHtml +
+                   `<table>${head}${body}</table>${nextPg}`;
+        }
+    } catch (e) {
+        html = `<h4>${escapeHtml(leaf.path)}</h4><div class="err">${escapeHtml(e.message)}</div>`;
+    }
+    state.detail[kb.kb_name] = { path: leaf.path, kind: leaf.kind, html };
+    render();
+}
+
+function render() {
+    const parts = [];
+    for (const kb of state.robots) {
+        const open = state.open.has(kb.kb_name);
+        const hb = state.heartbeatByKb[kb.kb_name];     // synchronous; loadRobots warmed the cache
+        const hbState = hb && hb.state || "unknown";
+        const hbTs    = hb && hb.ts;
+        const hbApps  = hb && hb.apps;
+        const dotCls  = hbState === "operating" ? "ok"
+                       : hbState === "degraded" ? "degraded"
+                       : "bad";
+        parts.push(`
+        <div class="robot">
+          <div class="robot-header" data-kb="${kb.kb_name}">
+            <span class="dot ${dotCls}"></span>
+            <div>
+              <div class="robot-title">${escapeHtml(kb.kb_name)}</div>
+              <div class="robot-sub">${escapeHtml(kb.class)} / ${escapeHtml(kb.instance)} · ${kb.leaf_count} leaves · last ${escapeHtml(fmtTs(hbTs))} · ${escapeHtml(hbState)}</div>
+              <div class="robot-sub">apps: ${escapeHtml(fmtAppsMap(hbApps))}</div>
+            </div>
+          </div>`);
+        if (open) {
+            const leaves = state.leavesByKb[kb.kb_name] || [];
+            const leafHtml = leaves.map(l => `
+                <div class="leaf" data-kb="${kb.kb_name}" data-path="${escapeHtml(l.path)}" data-kind="${l.kind}">
+                  <span>${escapeHtml(l.path)}</span>
+                  <span class="kind">${l.kind}</span>
+                </div>`).join("");
+            const detail = state.detail[kb.kb_name];
+            parts.push(`
+              <div class="robot-body open">
+                <div class="leaves">${leafHtml}</div>
+                ${detail ? `<div class="detail">${detail.html}</div>` : ""}
+              </div>`);
+        }
+        parts.push(`</div>`);
+    }
+    root.innerHTML = parts.join("");
+
+    root.querySelectorAll(".robot-header").forEach(el => {
+        el.addEventListener("click", () => {
+            const kb = el.dataset.kb;
+            if (state.open.has(kb)) state.open.delete(kb);
+            else state.open.add(kb);
+            state.detail[kb] = null;
+            render();
+        });
+    });
+    root.querySelectorAll(".leaf").forEach(el => {
+        el.addEventListener("click", () => {
+            const kbName = el.dataset.kb;
+            const kb = state.robots.find(r => r.kb_name === kbName);
+            const leaf = { path: el.dataset.path, kind: el.dataset.kind };
+            loadDetail(kb, leaf);
+        });
+    });
+    root.querySelectorAll(".chart-controls button").forEach(el => {
+        el.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            const kbName = el.dataset.kb;
+            const leafPath = el.dataset.leaf;
+            state.chartMetric[kbName + "|" + leafPath] = el.dataset.metric;
+            const kb = state.robots.find(r => r.kb_name === kbName);
+            loadDetail(kb, { path: leafPath, kind: "stream" });
+        });
+    });
+}
+
+document.getElementById("refresh").addEventListener("click", loadRobots);
+loadRobots();
+setInterval(loadRobots, 10000);
+</script>
+</body>
+</html>

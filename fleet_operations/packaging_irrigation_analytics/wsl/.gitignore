@@ -1,0 +1,5 @@
+fleet.env
+var/
+secrets/*
+!secrets/.gitkeep
+!secrets/*.example

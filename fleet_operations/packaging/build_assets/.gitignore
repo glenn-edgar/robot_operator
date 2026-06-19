@@ -1,0 +1,5 @@
+# In robot_operator the transport .so ARE vendored (committed) so a fresh clone
+# builds the image offline with no ~/src dependency. ./build_libs.sh regenerates
+# them from third_party/ source; the committed binaries are the build-now fallback.
+lib/*
+!lib/*.so

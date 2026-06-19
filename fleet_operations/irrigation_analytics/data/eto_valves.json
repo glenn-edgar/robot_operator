@@ -1,0 +1,27 @@
+{
+  "schema": "eto_valves/1",
+  "source": "controller eto_site_setup.json",
+  "snapshot_date": "2026-06-05",
+  "eto_valves": [
+    "satellite_2:13",
+    "satellite_2:14",
+    "satellite_2:15",
+    "satellite_2:16",
+    "satellite_3:1",
+    "satellite_3:13",
+    "satellite_3:14",
+    "satellite_3:15",
+    "satellite_3:18",
+    "satellite_3:2",
+    "satellite_3:5",
+    "satellite_4:1",
+    "satellite_4:10",
+    "satellite_4:11",
+    "satellite_4:12",
+    "satellite_4:3",
+    "satellite_4:4",
+    "satellite_4:6",
+    "satellite_4:7",
+    "satellite_4:9"
+  ]
+}

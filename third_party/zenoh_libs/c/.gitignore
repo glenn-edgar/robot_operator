@@ -1,0 +1,6 @@
+# Per-module build output (libraries, objects, test binaries)
+*/build/
+build/
+*.o
+*.a
+*.so

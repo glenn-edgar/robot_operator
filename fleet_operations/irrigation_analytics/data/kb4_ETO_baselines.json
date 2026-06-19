@@ -1,0 +1,202 @@
+{
+  "satellite_1:39/satellite_2:16": {
+    "flow_5_15_med": 11.0,
+    "gallons_5_15_med": 110.0,
+    "slope_med": 0.0,
+    "intercept_med": 11.0,
+    "wiggle_med": 0.0,
+    "curr_med": 0.9201586955302481,
+    "n_healthy": 9,
+    "n_all": 10
+  },
+  "satellite_1:39/satellite_3:14": {
+    "flow_5_15_med": 11.0,
+    "gallons_5_15_med": 110.0,
+    "slope_med": 0.0,
+    "intercept_med": 11.0,
+    "wiggle_med": 0.0,
+    "curr_med": 1.0214688584611231,
+    "n_healthy": 8,
+    "n_all": 8
+  },
+  "satellite_1:39/satellite_4:6/satellite_4:8": {
+    "flow_5_15_med": 11.0,
+    "gallons_5_15_med": 110.0,
+    "slope_med": 0.0,
+    "intercept_med": 11.0,
+    "wiggle_med": 0.19999999999999973,
+    "curr_med": 1.074268959664011,
+    "n_healthy": 48,
+    "n_all": 49
+  },
+  "satellite_2:13": {
+    "flow_5_15_med": 9.0,
+    "gallons_5_15_med": 90.0,
+    "slope_med": 0.0,
+    "intercept_med": 9.0,
+    "wiggle_med": 0.0,
+    "curr_med": 0.6739788055419929,
+    "n_healthy": 14,
+    "n_all": 15
+  },
+  "satellite_2:14": {
+    "flow_5_15_med": 8.0,
+    "gallons_5_15_med": 80.0,
+    "slope_med": 0.0,
+    "intercept_med": 8.0,
+    "wiggle_med": 0.0,
+    "curr_med": 0.6891587231610277,
+    "n_healthy": 18,
+    "n_all": 20
+  },
+  "satellite_2:15": {
+    "flow_5_15_med": 9.85,
+    "gallons_5_15_med": 98.5,
+    "slope_med": 0.0,
+    "intercept_med": 10.0,
+    "wiggle_med": 0.02121212121212146,
+    "curr_med": 0.6776087992900135,
+    "n_healthy": 12,
+    "n_all": 15
+  },
+  "satellite_3:1/satellite_3:7": {
+    "flow_5_15_med": 9.55,
+    "gallons_5_15_med": 95.5,
+    "slope_med": 0.0,
+    "intercept_med": 9.936363636363636,
+    "wiggle_med": 0.19090909090909003,
+    "curr_med": 0.7455888181119366,
+    "n_healthy": 14,
+    "n_all": 15
+  },
+  "satellite_3:2/satellite_4:12": {
+    "flow_5_15_med": 6.3,
+    "gallons_5_15_med": 63.0,
+    "slope_med": -0.03636363636363636,
+    "intercept_med": 6.5606060606060606,
+    "wiggle_med": 0.30454545454545445,
+    "curr_med": 0.9901186968829185,
+    "n_healthy": 14,
+    "n_all": 15
+  },
+  "satellite_3:5": {
+    "flow_5_15_med": 8.1,
+    "gallons_5_15_med": 81.0,
+    "slope_med": 0.0,
+    "intercept_med": 8.618181818181817,
+    "wiggle_med": 0.0,
+    "curr_med": 0.7624186953982804,
+    "n_healthy": 19,
+    "n_all": 21
+  },
+  "satellite_3:13": {
+    "flow_5_15_med": 9.0,
+    "gallons_5_15_med": 90.0,
+    "slope_med": 0.0,
+    "intercept_med": 9.0,
+    "wiggle_med": 0.05151515151515085,
+    "curr_med": 0.7201787587758667,
+    "n_healthy": 20,
+    "n_all": 20
+  },
+  "satellite_3:14": {
+    "flow_5_15_med": 10.4,
+    "gallons_5_15_med": 104.0,
+    "slope_med": -0.0030303030303030303,
+    "intercept_med": 10.53030303030303,
+    "wiggle_med": 0.2560606060606059,
+    "curr_med": 0.7056586291338954,
+    "n_healthy": 4,
+    "n_all": 5
+  },
+  "satellite_3:15": {
+    "flow_5_15_med": 10.8,
+    "gallons_5_15_med": 108.0,
+    "slope_med": -0.05454545454545454,
+    "intercept_med": 11.375757575757577,
+    "wiggle_med": 0.1999999999999984,
+    "curr_med": 0.6977385443610121,
+    "n_healthy": 5,
+    "n_all": 5
+  },
+  "satellite_3:18": {
+    "flow_5_15_med": 9.649999999999999,
+    "gallons_5_15_med": 96.5,
+    "slope_med": 0.00909090909090909,
+    "intercept_med": 9.490909090909092,
+    "wiggle_med": 0.1909090909090907,
+    "curr_med": 0.7327188027871634,
+    "n_healthy": 14,
+    "n_all": 15
+  },
+  "satellite_4:1": {
+    "flow_5_15_med": 7.95,
+    "gallons_5_15_med": 79.5,
+    "slope_med": 0.0,
+    "intercept_med": 8.0,
+    "wiggle_med": 0.0,
+    "curr_med": 0.7535086451350044,
+    "n_healthy": 26,
+    "n_all": 27
+  },
+  "satellite_4:3": {
+    "flow_5_15_med": 7.55,
+    "gallons_5_15_med": 75.5,
+    "slope_med": 0.0,
+    "intercept_med": 7.715151515151515,
+    "wiggle_med": 0.2681818181818181,
+    "curr_med": 0.7515286110542926,
+    "n_healthy": 14,
+    "n_all": 15
+  },
+  "satellite_4:4": {
+    "flow_5_15_med": 10.0,
+    "gallons_5_15_med": 100.0,
+    "slope_med": 0.0,
+    "intercept_med": 10.0,
+    "wiggle_med": 0.0,
+    "curr_med": 0.7472386746793187,
+    "n_healthy": 13,
+    "n_all": 16
+  },
+  "satellite_4:7": {
+    "flow_5_15_med": 10.0,
+    "gallons_5_15_med": 100.0,
+    "slope_med": -0.0030303030303030303,
+    "intercept_med": 10.0,
+    "wiggle_med": 0.10151515151515023,
+    "curr_med": 0.7726487340153881,
+    "n_healthy": 12,
+    "n_all": 15
+  },
+  "satellite_4:9": {
+    "flow_5_15_med": 7.0,
+    "gallons_5_15_med": 70.0,
+    "slope_med": 0.0,
+    "intercept_med": 7.0,
+    "wiggle_med": 0.0,
+    "curr_med": 0.7653886434194213,
+    "n_healthy": 28,
+    "n_all": 30
+  },
+  "satellite_4:10": {
+    "flow_5_15_med": 7.3,
+    "gallons_5_15_med": 73.0,
+    "slope_med": 0.0,
+    "intercept_med": 7.818181818181818,
+    "wiggle_med": 0.2727272727272725,
+    "curr_med": 0.7096186457453556,
+    "n_healthy": 13,
+    "n_all": 14
+  },
+  "satellite_4:11": {
+    "flow_5_15_med": 6.1,
+    "gallons_5_15_med": 61.0,
+    "slope_med": 0.0,
+    "intercept_med": 6.003030303030303,
+    "wiggle_med": 0.0,
+    "curr_med": 0.7353588310447912,
+    "n_healthy": 20,
+    "n_all": 22
+  }
+}

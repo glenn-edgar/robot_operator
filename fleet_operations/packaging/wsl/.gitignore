@@ -1,0 +1,4 @@
+# Deploy-local; never check in.
+fleet.env
+secrets/
+var/

@@ -1,0 +1,7 @@
+# Per-robot secrets — never commit the real env file.
+secrets/*
+!secrets/*.example
+!.gitignore
+
+# Runtime identity state (auto-generated per instance).
+identity/

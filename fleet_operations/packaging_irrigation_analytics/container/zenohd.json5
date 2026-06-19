@@ -1,0 +1,21 @@
+// zenohd.json5 — minimal router config for the irrigation_analytics fleet
+// container. Always listens on the internal port 7447; host-side port
+// remapping (eg. 27447 -> 7447) happens via docker `-p` flags in
+// packaging_irrigation_analytics/wsl/start.sh.
+//
+// All in-container peers dial tcp/127.0.0.1:7447. Bridge networking on the
+// host means no port collision with fleet-mcfarland's 7447 listener.
+{
+  mode: "router",
+  listen: {
+    endpoints: ["tcp/0.0.0.0:7447"],
+  },
+  scouting: {
+    multicast: {
+      enabled: false,
+    },
+    gossip: {
+      enabled: true,
+    },
+  },
+}

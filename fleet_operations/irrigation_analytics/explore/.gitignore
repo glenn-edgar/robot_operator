@@ -1,0 +1,3 @@
+# Mutable working dir — re-populated by fetch_*.sh on every pull.
+# snapshots/ is committed (dated archive for day-over-day diff).
+data/

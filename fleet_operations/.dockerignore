@@ -1,0 +1,22 @@
+# Keep per-deploy state OUT of the image. Bind-mounted at runtime.
+**/identity/state.json
+**/secrets/*
+!**/secrets/*.example
+
+# Local data + logs never belong in the image.
+var/
+**/var/
+*.log
+**/*.log
+
+# Build artifacts that aren't ours.
+.git/
+.gitignore
+**/__pycache__/
+**/*.pyc
+**/node_modules/
+
+# Build prep artifacts (we COPY only what we want explicitly).
+packaging/build_assets/lib/*.bak
+packaging/wsl/var/
+packaging/wsl/secrets/

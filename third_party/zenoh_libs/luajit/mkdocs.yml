@@ -1,0 +1,4 @@
+site_name: Zenoh LuaJIT Bindings
+docs_dir: docs
+nav:
+  - Overview: README_zenoh.md

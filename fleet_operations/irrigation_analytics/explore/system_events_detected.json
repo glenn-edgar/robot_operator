@@ -1,0 +1,104 @@
+[
+  {
+    "ord_event": -14,
+    "r_before_median": 36.64,
+    "r_after": 43.41,
+    "delta_r": 6.77,
+    "valve_baseline": 39.07,
+    "uplift": 4.33,
+    "pre_window": [
+      39.74,
+      35.53,
+      35.0,
+      36.64,
+      39.07
+    ],
+    "post_source": "cold",
+    "valve": "satellite_2:11"
+  },
+  {
+    "ord_event": -13,
+    "r_before_median": 36.64,
+    "r_after": 44.23,
+    "delta_r": 7.59,
+    "valve_baseline": 39.74,
+    "uplift": 4.49,
+    "pre_window": [
+      36.64,
+      36.07,
+      36.64,
+      40.42,
+      43.41
+    ],
+    "post_source": "cold",
+    "valve": "satellite_2:7"
+  },
+  {
+    "ord_event": -14,
+    "r_before_median": 36.07,
+    "r_after": 43.41,
+    "delta_r": 7.34,
+    "valve_baseline": 39.07,
+    "uplift": 4.33,
+    "pre_window": [
+      39.74,
+      35.53,
+      36.07,
+      36.07,
+      39.07
+    ],
+    "post_source": "cold",
+    "valve": "satellite_2:3"
+  },
+  {
+    "ord_event": -14,
+    "r_before_median": 37.22,
+    "r_after": 44.23,
+    "delta_r": 7.01,
+    "valve_baseline": 39.07,
+    "uplift": 5.15,
+    "pre_window": [
+      40.42,
+      37.22,
+      35.0,
+      36.07,
+      39.74
+    ],
+    "post_source": "cold",
+    "valve": "satellite_2:5"
+  },
+  {
+    "ord_event": -14,
+    "r_before_median": 36.07,
+    "r_after": 44.23,
+    "delta_r": 8.15,
+    "valve_baseline": 39.41,
+    "uplift": 4.82,
+    "pre_window": [
+      39.74,
+      36.07,
+      35.53,
+      36.07,
+      39.74
+    ],
+    "post_source": "cold",
+    "valve": "satellite_2:1"
+  },
+  {
+    "ord_event": -13,
+    "r_before_median": 38.44,
+    "r_after": 45.07,
+    "delta_r": 6.64,
+    "valve_baseline": 40.42,
+    "uplift": 4.66,
+    "pre_window": [
+      37.22,
+      38.44,
+      37.82,
+      40.42,
+      43.41
+    ],
+    "post_source": "cold",
+    "valve": "satellite_2:6"
+  }
+]

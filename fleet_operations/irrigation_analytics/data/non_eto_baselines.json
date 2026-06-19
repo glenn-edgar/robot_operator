@@ -1,0 +1,282 @@
+{
+  "satellite_1:20": {
+    "base_end_hunter_gpm": 5.67,
+    "mad": 0.33,
+    "n_runs": 23
+  },
+  "satellite_2:1/satellite_1:30/satellite_1:39": {
+    "base_end_hunter_gpm": 16.33,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_4:13": {
+    "base_end_hunter_gpm": 5.0,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_1:6/satellite_1:1/satellite_1:39": {
+    "base_end_hunter_gpm": 14.0,
+    "mad": 0.33,
+    "n_runs": 29
+  },
+  "satellite_2:7/satellite_1:39": {
+    "base_end_hunter_gpm": 9.33,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_1:13": {
+    "base_end_hunter_gpm": 8.0,
+    "mad": 1.0,
+    "n_runs": 26
+  },
+  "satellite_1:7/satellite_1:39": {
+    "base_end_hunter_gpm": 9.33,
+    "mad": 0.33,
+    "n_runs": 29
+  },
+  "satellite_2:17": {
+    "base_end_hunter_gpm": 8.67,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_2:2": {
+    "base_end_hunter_gpm": 12.33,
+    "mad": 0.67,
+    "n_runs": 32
+  },
+  "satellite_1:13/satellite_1:27/satellite_1:39": {
+    "base_end_hunter_gpm": 12.0,
+    "mad": 0.0,
+    "n_runs": 3
+  },
+  "satellite_1:32": {
+    "base_end_hunter_gpm": 8.0,
+    "mad": 0.83,
+    "n_runs": 12
+  },
+  "satellite_1:6": {
+    "base_end_hunter_gpm": 9.0,
+    "mad": 1.0,
+    "n_runs": 23
+  },
+  "satellite_3:11/satellite_1:39": {
+    "base_end_hunter_gpm": 1.0,
+    "mad": 0.0,
+    "n_runs": 5
+  },
+  "satellite_3:19": {
+    "base_end_hunter_gpm": 6.0,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_1:31": {
+    "base_end_hunter_gpm": 8.17,
+    "mad": 1.17,
+    "n_runs": 12
+  },
+  "satellite_3:12/satellite_1:39": {
+    "base_end_hunter_gpm": 15.33,
+    "mad": 0.33,
+    "n_runs": 48
+  },
+  "satellite_1:7": {
+    "base_end_hunter_gpm": 7.33,
+    "mad": 0.67,
+    "n_runs": 24
+  },
+  "satellite_2:2/satellite_1:39": {
+    "base_end_hunter_gpm": 18.0,
+    "mad": 0.33,
+    "n_runs": 47
+  },
+  "satellite_4:2": {
+    "base_end_hunter_gpm": 5.0,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_1:39/satellite_1:17": {
+    "base_end_hunter_gpm": 5.33,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_1:17": {
+    "base_end_hunter_gpm": 4.33,
+    "mad": 0.33,
+    "n_runs": 23
+  },
+  "satellite_2:6": {
+    "base_end_hunter_gpm": 11.33,
+    "mad": 0.34,
+    "n_runs": 49
+  },
+  "satellite_1:12": {
+    "base_end_hunter_gpm": 8.0,
+    "mad": 0.67,
+    "n_runs": 24
+  },
+  "satellite_2:7": {
+    "base_end_hunter_gpm": 7.33,
+    "mad": 0.67,
+    "n_runs": 38
+  },
+  "satellite_2:3": {
+    "base_end_hunter_gpm": 7.33,
+    "mad": 1.0,
+    "n_runs": 36
+  },
+  "satellite_4:14": {
+    "base_end_hunter_gpm": 9.17,
+    "mad": 1.5,
+    "n_runs": 6
+  },
+  "satellite_2:3/satellite_1:39": {
+    "base_end_hunter_gpm": 8.33,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_2:1": {
+    "base_end_hunter_gpm": 8.33,
+    "mad": 1.0,
+    "n_runs": 37
+  },
+  "satellite_1:30/satellite_1:39": {
+    "base_end_hunter_gpm": 9.0,
+    "mad": 0.33,
+    "n_runs": 21
+  },
+  "satellite_1:31/satellite_1:39": {
+    "base_end_hunter_gpm": 10.33,
+    "mad": 0.0,
+    "n_runs": 49
+  },
+  "satellite_3:19/satellite_1:39": {
+    "base_end_hunter_gpm": 6.0,
+    "mad": 0.0,
+    "n_runs": 49
+  },
+  "satellite_3:11/satellite_3:12/satellite_1:39": {
+    "base_end_hunter_gpm": 15.33,
+    "mad": 0.33,
+    "n_runs": 31
+  },
+  "satellite_4:13/satellite_1:39": {
+    "base_end_hunter_gpm": 5.0,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_1:29/satellite_1:39": {
+    "base_end_hunter_gpm": 12.0,
+    "mad": 0.0,
+    "n_runs": 49
+  },
+  "satellite_1:29": {
+    "base_end_hunter_gpm": 11.5,
+    "mad": 2.5,
+    "n_runs": 12
+  },
+  "satellite_2:17/satellite_1:39": {
+    "base_end_hunter_gpm": 8.0,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_1:17/satellite_1:39": {
+    "base_end_hunter_gpm": 4.33,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_2:11/satellite_1:39": {
+    "base_end_hunter_gpm": 8.67,
+    "mad": 0.34,
+    "n_runs": 49
+  },
+  "satellite_3:11": {
+    "base_end_hunter_gpm": 10.33,
+    "mad": 1.33,
+    "n_runs": 21
+  },
+  "satellite_2:5/satellite_1:39": {
+    "base_end_hunter_gpm": 4.33,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_3:12": {
+    "base_end_hunter_gpm": 12.33,
+    "mad": 2.0,
+    "n_runs": 34
+  },
+  "satellite_4:2/satellite_1:39": {
+    "base_end_hunter_gpm": 13.0,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_2:4/satellite_1:39": {
+    "base_end_hunter_gpm": 7.67,
+    "mad": 0.34,
+    "n_runs": 49
+  },
+  "satellite_1:12/satellite_1:39": {
+    "base_end_hunter_gpm": 12.0,
+    "mad": 0.0,
+    "n_runs": 42
+  },
+  "satellite_3:4": {
+    "base_end_hunter_gpm": 7.0,
+    "mad": 1.0,
+    "n_runs": 49
+  },
+  "satellite_1:32/satellite_1:39": {
+    "base_end_hunter_gpm": 10.33,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_1:27/satellite_1:39": {
+    "base_end_hunter_gpm": 11.0,
+    "mad": 0.0,
+    "n_runs": 6
+  },
+  "satellite_1:30": {
+    "base_end_hunter_gpm": 7.33,
+    "mad": 0.83,
+    "n_runs": 12
+  },
+  "satellite_3:4/satellite_1:39": {
+    "base_end_hunter_gpm": 6.33,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_2:4": {
+    "base_end_hunter_gpm": 7.33,
+    "mad": 0.66,
+    "n_runs": 35
+  },
+  "satellite_2:5": {
+    "base_end_hunter_gpm": 5.0,
+    "mad": 0.33,
+    "n_runs": 35
+  },
+  "satellite_2:11": {
+    "base_end_hunter_gpm": 6.67,
+    "mad": 0.33,
+    "n_runs": 37
+  },
+  "satellite_1:13/satellite_1:19/satellite_1:39": {
+    "base_end_hunter_gpm": 11.0,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_1:20/satellite_1:39": {
+    "base_end_hunter_gpm": 4.33,
+    "mad": 0.34,
+    "n_runs": 46
+  },
+  "satellite_1:30/satellite_1:1/satellite_1:39": {
+    "base_end_hunter_gpm": 8.33,
+    "mad": 0.33,
+    "n_runs": 49
+  },
+  "satellite_2:6/satellite_1:39": {
+    "base_end_hunter_gpm": 9.67,
+    "mad": 0.33,
+    "n_runs": 49
+  }
+}
