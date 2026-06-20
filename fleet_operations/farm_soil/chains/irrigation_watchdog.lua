@@ -1,14 +1,17 @@
 -- chains/irrigation_watchdog.lua — build-time DSL for the irrigation-site
 -- liveness watchdog.
 --
--- The irrigation Pi (192.168.1.146) sits on an Alexa-controlled power plug.
--- After a power-blip the operator has to remotely flip the plug back on; we
--- nag them on Discord until they do, then ack the restoration.
+-- The irrigation Pi (192.168.1.146) sits on an Amazon smart plug. After a
+-- power-blip the watchdog first tries to flip the plug back on itself via
+-- Voice Monkey (see lib/plug_client + M.plug); only if that auto-recovery is
+-- disabled or exhausted does it nag the operator on Discord to do it by hand.
+-- On recovery it acks, noting whether it self-healed.
 --
--- Polls every poll_s; after the server has been unreachable for
--- down_threshold_s seconds, posts a Discord alert; while still down, posts
--- another alert every alert_interval_s. On recovery, posts a single
--- "RESTORED after X" ack.
+-- Polls every poll_s. While down: after recover_after_s it fires the
+-- plug "turn ON" trigger, retrying every recover_cooldown_s up to
+-- recover_max_attempts. If still down past down_threshold_s with recovery
+-- exhausted/off, posts a Discord alert, re-posting every alert_interval_s.
+-- On recovery, posts a single "RESTORED after X" ack.
 --
 --   irrigation_watchdog_col
 --     [1] one_shot(IRRIGATION_WATCHDOG_TICK)

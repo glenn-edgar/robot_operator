@@ -147,6 +147,20 @@ M.irrigation = {
     timeout_s = 15,
 }
 
+-- Smart-plug control — read by chains/irrigation_watchdog_user_functions.lua
+-- via lib/plug_client.lua. The irrigation Pi is powered by an Amazon Basics
+-- smart plug, which has no LAN API — we power it on through Voice Monkey (an
+-- Alexa skill) by firing a "trigger" device wired in the Alexa app to a
+-- "turn ON <plug>" Routine. `device` is the Voice Monkey trigger-device id
+-- (deployment data, not a secret); the token comes from the environment
+-- (VOICEMONKEY_TOKEN, sourced by run.sh from secrets/ttn.env). Set
+-- enabled=false (or leave the token/device blank) to disable auto power-on
+-- and fall back to the manual "reset the Alexa plug" Discord nag.
+M.plug = {
+    enabled = true,
+    device  = "irrigation-pi-power-3f7k2-d4ukm",  -- Voice Monkey trigger-device id
+}
+
 -- ETO-sync skill config — read by chains/eto_sync_user_functions.lua.
 -- Daily one-shot that adjusts the irrigation controller's per-zone ETo
 -- accumulator (eto_update_table Redis hash) by the CIMIS station-vs-spatial
@@ -166,16 +180,24 @@ M.eto_sync = {
 
 -- Irrigation-site liveness watchdog config — read by
 -- chains/irrigation_watchdog_user_functions.lua.
--- Polls M.irrigation.host every poll_s. After down_threshold_s of sustained
--- unreachability, posts a Discord "DOWN, reset the Alexa plug" alert; while
--- still down, re-posts every alert_interval_s. On recovery, posts one
--- "RESTORED after X" ack. State is in-memory only (container restart resets
--- to "assume up"; tradeoff documented in the user_functions module).
+-- Polls M.irrigation.host every poll_s. While down, it first tries to
+-- self-heal by firing the Voice Monkey "turn ON" trigger (see M.plug):
+-- after recover_after_s down it fires once, then re-fires every
+-- recover_cooldown_s (long enough for the Pi to power up + boot) up to
+-- recover_max_attempts. Only once auto-recovery is exhausted (or disabled)
+-- does it fall back to the Discord "DOWN, reset the Alexa plug" nag at
+-- down_threshold_s, re-posting every alert_interval_s. On recovery it posts
+-- one "RESTORED" ack noting whether it self-healed. State is in-memory only
+-- (container restart resets to "assume up"; tradeoff documented in the
+-- user_functions module).
 M.irrigation_watchdog = {
-    poll_s             = 60,       -- probe cadence
-    down_threshold_s   = 300,      -- 5 min sustained down before first alert
-    alert_interval_s   = 300,      -- 5 min between repeated alerts
-    probe_timeout_s    = 3,        -- per-probe curl timeout
+    poll_s               = 60,     -- probe cadence
+    down_threshold_s     = 300,    -- 5 min sustained down before first nag
+    alert_interval_s     = 300,    -- 5 min between repeated nags
+    probe_timeout_s      = 3,      -- per-probe curl timeout
+    recover_after_s      = 120,    -- down this long -> fire first auto power-on
+    recover_cooldown_s   = 180,    -- min gap between power-on attempts (boot time)
+    recover_max_attempts = 3,      -- give up auto-recovery after this many tries
 }
 
 -- device_id -> location (the sensing-point sub-namespace). Adding a sensor is
