@@ -1,0 +1,54 @@
+site_name: robot_operator
+site_description: >
+  Standalone, self-contained home for the operational robot fleet — a
+  chain_tree LuaJIT robot framework on a local Zenoh fabric, built fully from
+  vendored source and deployed to Raspberry Pi 4 as a single Docker container.
+repo_url: https://github.com/glenn-edgar/robot_operator
+repo_name: glenn-edgar/robot_operator
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.integrate
+  palette:
+    - scheme: default
+      primary: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Background:
+      - Opening — the virtual operator: background/index.md
+      - "farm_soil — consolidation": background/farm_soil.md
+      - "farm_soil — self-healing": background/farm_soil_self_healing.md
+      - "rancho_water — the adapter": background/rancho_water.md
+      - "irrigation_analytics — the full operator": background/irrigation_analytics.md
+      - Subsystems: background/subsystems.md
+  - Build from source: build-from-source.md
+  - Deploy to the Pi: deploy-to-pi.md
+  - Fleet framework:
+      - Overview: fleet/index.md
+      - Architecture: fleet/architecture.md
+      - Container runtime: fleet/container_runtime.md
+      - Deploy guide (WSL + Pi): fleet/deploy.md
+      - Robot classes: fleet/robots.md
+      - Operations: fleet/operations.md
