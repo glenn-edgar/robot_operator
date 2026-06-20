@@ -22,8 +22,16 @@ M.capabilities = {
 -- (chains/synoptic.lua) — one per station, per-bin Penman computed locally.
 -- eto_resolver picks the daily ETo source by priority chain and publishes
 -- the winner to <ns>/eto/{daily,latest} for the dashboard.
+--
+-- NOTE (2026-06-19): the two Synoptic stations (sce_se224, synoptic_sruc1)
+-- are DISABLED — we have no valid Synoptic API token (provider never issued
+-- one; the env held the raw API key, which the API rejects). Both KBs are
+-- Synoptic-only (no alternative data source), so without a token they only
+-- ever sit "degraded". ETo runs fine on CIMIS via eto_resolver. Re-enable by
+-- adding "sce_se224"/"synoptic_sruc1" back here AND "SE224"/"SRUC1" to
+-- M.eto_resolver.priority once a real SYNOPTIC_TOKEN exists. See M.synoptic.
 M.app_kbs = { "moisture", "cimis_station", "cimis_spatial",
-              "sce_se224", "synoptic_sruc1", "eto_resolver",
+              "eto_resolver",
               "digest", "eto_sync", "irrigation_watchdog" }
 
 -- TTN v3 storage API config for the moisture skill. The bearer token is NOT
@@ -118,7 +126,9 @@ M.synoptic = {
 M.eto_resolver = {
     retry_s      = 900,
     min_coverage = 0.85,
-    priority     = { "SE224", "cimis_spatial", "SRUC1", "cimis_station" },
+    -- Synoptic sources (SE224, SRUC1) removed while disabled — see M.app_kbs
+    -- note (no valid Synoptic token). CIMIS-only until a token is issued.
+    priority     = { "cimis_spatial", "cimis_station" },
 }
 
 -- Daily-digest config — read by chains/digest_user_functions.lua.
