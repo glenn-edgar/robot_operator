@@ -84,11 +84,22 @@ the container.
   Hunter delivered a healthy 7–8 GPM (e.g. 3:13 PLC=0 all run, Hunter ramped to 7.0 — skipped
   anyway). Well-drawdown is now monitor-only; KB3_ARM_KILL (Hunter leak) + KB1 stay armed.
   The well-drawdown (PLC) and clog-filter (Hunter) were "two detectors doing the same thing"
-  → **DONE: consolidated into `lib/flow_deplete.lua`** (deployed `0.51-flow-consolidate`,
-  monitor-only). Hunter-ONLY; trips on depletion (Hunter drops below its own early-run plateau)
-  OR low-vs-baseline; on trip does `rpush(reinsert step)`+`rpush(1:39 wait)`+`SKIP` (queue pops
-  [wait → re-run step]), one wait+retry per step (anti-loop). Gate `KB3_FLOW_ARM` (default OFF;
-  `KB3_WELL_ARM` retired). Watch: `ssh robot 'docker logs irrigation-analytics 2>&1 | grep -iE FLOW-DEPLETE'`.
+  → **DONE: consolidated into `lib/flow_deplete.lua`**. Hunter-ONLY. Two trip paths (once/step):
+  (A) DEPLETION — Hunter drops below its own post-ramp steady; (B) LOW — steady < 0.75× baseline.
+  RAMP-SAFE: only judges AFTER the slow Filtered-Hunter ramp (steady window min 10–15, no verdict
+  before min 14) — fixed a 06-21 false fire on 3:18 that tripped at min 9 mid-ramp.
+- **ARMED + VALIDATED 2026-06-21 (prod `0.52-flow-clean`, `KB3_FLOW_ARM=1`).** On a trip the
+  recovery is ONE consistent action for low-flow OR clogged filter (Glenn "i believe the filter
+  is bad"): `rpush(reinsert step)` + `rpush(CLEAN_FILTER)` + `rpush(1:39 wait)` + `SKIP` →
+  controller pops **[wait → CLEAN_FILTER → re-run step]**. One clean+retry per step (anti-loop;
+  a step still low after the clean is the head/valve, not the filter). CLEAN_FILTER + reinsert
+  jobs byte-matched to live IRRIGATION_PENDING.
+  **FIRST CONFIRMED AUTONOMOUS RECOVERY:** 2:15 (step 28) delivered **7.2 GPM (0.73× base 9.8)** →
+  fired at min 14 → wait → CLEAN_FILTER (14:17) → 2:15 re-ran → recovered to **~10.4 GPM (1.06×)**,
+  no re-fire. The filter WAS bad; the auto-clean fixed it (+44% flow). PLC well meter also read
+  ~11–13 again on the retry (was false-0). Gate `KB3_FLOW_ARM`; disarm = set 0 + `bash start.sh`.
+  NOTE: Pi `start.sh` must forward `-e KB3_FLOW_ARM` (added 06-21) or the gate silently no-ops.
+  Watch: `ssh robot 'docker logs irrigation-analytics 2>&1 | grep -iE FLOW-DEPLETE'`.
 
 ## FIXED + DEPLOYED (prod `0.49-cursor-fix`, 2026-06-20) — clog/flow analysis blind: POISONED CURSOR (root-caused 2026-06-20)
 - **DEPLOYED to the Pi 2026-06-20**: image `irrigation-analytics:0.49-cursor-fix` built,
