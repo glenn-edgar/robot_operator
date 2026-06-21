@@ -13,7 +13,8 @@ sliver of autonomy without sliding down the slope toward controlling the farm.
 ## The 2 a.m. failure mode
 
 The irrigation controller `farm_soil` keeps an eye on lives on a Raspberry Pi out
-in the field. That Pi is plugged into a cheap **Amazon smart plug**. Power blips
+in the field. That Pi is plugged into a cheap **Amazon smart plug**, because we wanted
+to be able to remote reset the pi.  Power blips
 in rural areas; when one hits, the plug stays off, the Pi stays dark, and the
 controller is gone until *a human notices and flips it back on*. Until recently
 that's exactly what happened: the watchdog detected the outage and nagged the
