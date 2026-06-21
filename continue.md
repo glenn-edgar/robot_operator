@@ -13,17 +13,21 @@ field state) and project memories `irrigation-analytics-deploy`, `fleet-mcfarlan
 
 ## TL;DR — where things stand
 
-- **Production = the Pi**, image **`nanodatacenter/irrigation-analytics:0.51-flow-consolidate`**,
-  armed: `KB1_ARM_KILL=1 KB3_ARM_KILL=1 SKIP_LIVE=1 KB4_CURVE_ARM=1 FIELD_LOG_ARM=1`.
+- **Production = the Pi**, image **`nanodatacenter/irrigation-analytics:0.52-flow-clean`**,
+  armed: `KB1_ARM_KILL=1 KB3_ARM_KILL=1 SKIP_LIVE=1 KB4_CURVE_ARM=1 FIELD_LOG_ARM=1`
+  **and `KB3_FLOW_ARM=1`** (flow-deplete is LIVE-actuating as of 2026-06-21 ~13:30).
+  Disarm fast: `ssh robot 'cd /home/pi/farm/irrigation_analytics && sed -i "s/^KB3_FLOW_ARM=.*/KB3_FLOW_ARM=0/" fleet.env && bash start.sh'`.
+  NOTE: the Pi `start.sh` must forward `-e KB3_FLOW_ARM` (added 2026-06-21) or the gate no-ops.
 - **DESIGN (Glenn 2026-06-21): HUNTER is truth; PLC never triggers an action alone.** Hunter
   good + PLC bad → keep running. The old PLC well-drawdown false-skipped 5 healthy stations on
   the sand-fouled meter, so it's **retired**.
-- **CONSOLIDATED: one Hunter-only detector** (`lib/flow_deplete.lua`, replaced clog_filter.lua +
-  the PLC well-drawdown). Trips on depletion (Hunter drops below its own early-run plateau) OR
-  low-vs-baseline. On trip (when armed) it does `rpush(reinsert step)` → `rpush(1:39 wait)` →
-  `SKIP` so the queue pops [wait → re-run step]; one wait+retry per step (anti-loop).
-  **MONITOR-ONLY now** — gate `KB3_FLOW_ARM` is OFF; logs `FLOW-DEPLETE [monitor] … WOULD …`
-  with the exact reinsert+wait jobs. `KB3_WELL_ARM` is retired (dead var; harmless if still in fleet.env).
+- **CONSOLIDATED: one Hunter-only detector** (`lib/flow_deplete.lua`). Trips on depletion
+  (Hunter drops below its own post-ramp steady) OR low-vs-baseline (steady < 0.75× baseline).
+  Judges only AFTER the slow Filtered-Hunter ramp (steady window min 10–15, JUDGE_FROM=14) —
+  this fixed a 06-21 false fire where it tripped at min 9 on a still-climbing 3:18.
+  On a trip (ARMED) it does `rpush(reinsert step)` → `rpush(CLEAN_FILTER)` → `rpush(1:39 wait)`
+  → `SKIP`, so the queue pops [wait → CLEAN_FILTER → re-run step]. One clean+retry per step
+  (anti-loop). Both job formats byte-matched to live IRRIGATION_PENDING. `KB3_WELL_ARM` retired.
 - Everything is committed AND pushed to `origin/main` (see `git log`).
 - The earlier **poisoned-cursor outage is fixed** (cursor fix in 0.49, deployed; detectors
   record again).

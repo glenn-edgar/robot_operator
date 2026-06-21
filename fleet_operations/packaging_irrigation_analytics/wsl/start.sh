@@ -103,7 +103,7 @@ exec docker run -d \
     -e KB3_ARM_KILL="${KB3_ARM_KILL:-0}" \
     -e SKIP_LIVE="${SKIP_LIVE:-0}" \
     -e FIELD_LOG_ARM="${FIELD_LOG_ARM:-0}" \
-    -e KB3_WELL_ARM="${KB3_WELL_ARM:-0}" \
+    -e KB3_FLOW_ARM="${KB3_FLOW_ARM:-0}" \
     -e KB4_CURVE_ARM="${KB4_CURVE_ARM:-0}" \
     -e KB1_EQ_KILL_A="${KB1_EQ_KILL_A:-1.8}" \
     "$IMAGE_TAG"

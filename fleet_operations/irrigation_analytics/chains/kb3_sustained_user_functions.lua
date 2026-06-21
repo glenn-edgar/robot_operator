@@ -92,9 +92,9 @@ M.one_shot.KB3_TICK = function(handle, _node)
             last_stream_id = nil,
             initialized = false,
             arming = nil,
-            -- anti-loop: steps we've already done one flow-deplete wait+retry for
-            -- (keyed "schedule:step"). A reinserted step that's STILL depleting must
-            -- NOT trigger again — one wait+retry per step, then let it run.
+            -- anti-loop: steps we've already done one flow-deplete clean+retry for
+            -- (keyed "schedule:step"). A reinserted step that's STILL low must NOT
+            -- trigger again — one clean+wait+retry per step, then let it run.
             flow_acted = {},
         }
     end
@@ -177,7 +177,7 @@ M.one_shot.KB3_TICK = function(handle, _node)
                     station_step  = ent.details.step,
                     run_time      = tonumber(ent.details.run_time),
                     started_sid   = ent.stream_id,
-                    io_setup      = io_setup,   -- kept to build the reinsert job on a flow-deplete trip
+                    io_setup      = io_setup,   -- kept to build the reinsert job on a trip
                     prev_elapsed  = nil,
                     consecutive   = 0,
                     fired         = false,
@@ -245,14 +245,16 @@ M.one_shot.KB3_TICK = function(handle, _node)
     -- recharge/flush delivers ~0 Hunter → would false-trip; a field-checked station
     -- is city-backed too).
     --
-    -- ACTION on a trip (KB3_FLOW_ARM): SKIP the step, but first rpush the recovery
-    -- so the controller (rpop = front) runs it NEXT. rpush ORDER is the REVERSE of
-    -- run order, so push the step FIRST, then the wait:
-    --   1. rpush(reinsert)  -- this step, re-queued to retry
-    --   2. rpush(wait)      -- the 15-min 1:39 city wait (well rests / line settles)
-    -- → controller pops [wait → reinsert]; then SKIP_STATION ends the depleting step
-    -- so the queue advances into the wait. Monitor-only (gate off) logs the exact
-    -- jobs it WOULD rpush and posts nothing. One wait+retry per step (anti-loop).
+    -- ACTION on a trip (KB3_FLOW_ARM) — ONE consistent recovery for low-flow OR a
+    -- clogged filter (Glenn 2026-06-21 "i believe the filter is bad"): SKIP the step,
+    -- but first rpush the recovery so the controller (rpop = front) runs it NEXT.
+    -- rpush ORDER is the REVERSE of run order, so push them backwards:
+    --   1. rpush(reinsert)     -- this step, re-queued to retry
+    --   2. rpush(CLEAN_FILTER) -- clean the (bad) filter
+    --   3. rpush(wait)         -- the 15-min 1:39 city wait (well rests / line settles)
+    -- → controller pops [wait → CLEAN_FILTER → reinsert]; then SKIP_STATION ends the
+    -- depleting step so the queue advances into the wait. Monitor-only (gate off) logs
+    -- the exact jobs it WOULD rpush and posts nothing. One clean+retry per step (anti-loop).
     if elapsed and st.arming.flow_state and not st.arming.is_city
        and st.arming.flow_last_min ~= elapsed then
         st.arming.flow_last_min = elapsed
@@ -275,8 +277,11 @@ M.one_shot.KB3_TICK = function(handle, _node)
                     schedule = st.arming.schedule, step = st.arming.station_step,
                     io_setup = st.arming.io_setup, run_time = st.arming.run_time })
                 if KB3_FLOW_ARM then
-                    -- reverse rpush: step first, then wait → pops [wait → re-run step]
+                    -- reverse rpush: step, then CLEAN_FILTER, then wait →
+                    -- pops [wait → CLEAN_FILTER → re-run step]
                     local rok = WsCommand.queue_front(reinsert,
+                        { logger = function(m) log(id, "[ws] %s", m) end })
+                    local cok = WsCommand.queue_front(FlowDeplete.CLEAN_FILTER_JOB,
                         { logger = function(m) log(id, "[ws] %s", m) end })
                     local wok = WsCommand.queue_front(WellDrawdown.WAIT_JOB,
                         { logger = function(m) log(id, "[ws] %s", m) end })
@@ -285,22 +290,23 @@ M.one_shot.KB3_TICK = function(handle, _node)
                         step          = tostring(st.arming.station_step or ""),
                         logger        = function(m) log(id, "[ws] %s", m) end })
                     log(id, "FLOW-DEPLETE ARMED bin=%s min=%s reason=%s HUNTER_med=%.1f base=%.1f ratio=%.2f"
-                        .. " → rpush reinsert(%s) + rpush wait(%s) + SKIP(%s)",
+                        .. " → rpush reinsert(%s) + rpush CLEAN_FILTER(%s) + rpush wait(%s) + SKIP(%s)",
                         st.arming.bin, tostring(elapsed), tostring(r.reason),
                         r.hun_med or 0, r.baseline or 0, r.ratio or 0,
-                        tostring(rok), tostring(wok), tostring(sok))
+                        tostring(rok), tostring(cok), tostring(wok), tostring(sok))
                 else
                     log(id, "FLOW-DEPLETE [monitor] bin=%s min=%s reason=%s HUNTER_med=%.1f base=%.1f ratio=%.2f"
-                        .. " → WOULD rpush reinsert + rpush wait + SKIP (KB3_FLOW_ARM off)\n    reinsert=%s\n    wait=%s",
+                        .. " → WOULD rpush reinsert + rpush CLEAN_FILTER + rpush wait + SKIP (KB3_FLOW_ARM off)"
+                        .. "\n    reinsert=%s\n    clean=%s\n    wait=%s",
                         st.arming.bin, tostring(elapsed), tostring(r.reason),
                         r.hun_med or 0, r.baseline or 0, r.ratio or 0,
-                        reinsert, WellDrawdown.WAIT_JOB)
+                        reinsert, FlowDeplete.CLEAN_FILTER_JOB, WellDrawdown.WAIT_JOB)
                 end
             elseif r.below then
-                log(id, "flow-deplete [watch] bin=%s min=%s HUNTER=%s plateau=%s base=%s ratio=%s (%s)",
+                log(id, "flow-deplete [watch] bin=%s min=%s HUNTER=%s steady=%s base=%s ratio=%s (%s)",
                     st.arming.bin, tostring(elapsed),
                     hunter and string.format("%.1f", hunter) or "nil",
-                    r.plateau and string.format("%.1f", r.plateau) or "-",
+                    r.steady and string.format("%.1f", r.steady) or "-",
                     r.baseline and string.format("%.1f", r.baseline) or "-",
                     r.ratio and string.format("%.2f", r.ratio) or "-", tostring(r.reason))
             end
