@@ -50,13 +50,26 @@ local function run_remote_python(ssh_host, timeout_s, py_code)
     if not fh then return nil, "controller_client: cannot open tmp file" end
     fh:write(py_code)
     fh:close()
+    -- Send stderr to its OWN file, NOT 2>&1. With 2>&1 an ssh/python transport
+    -- error (e.g. "ssh: connect to host ... No route to host") merges into stdout
+    -- and masquerades as remote data — that is exactly what poisoned the
+    -- past_actions cursor on 06-19. Keeping streams separate means stdout only
+    -- ever carries real program output.
+    local errf = os.tmpname()
     local cmd = string.format(
-        "ssh -o ConnectTimeout=%d -o BatchMode=yes %s 'python3 -' < %s 2>&1",
-        timeout_s, ssh_host, shell_escape_single(tmp))
+        "ssh -o ConnectTimeout=%d -o BatchMode=yes %s 'python3 -' < %s 2> %s",
+        timeout_s, ssh_host, shell_escape_single(tmp), shell_escape_single(errf))
     local pipe = io.popen(cmd, "r")
     local raw = pipe and pipe:read("*a") or ""
     if pipe then pipe:close() end
     os.remove(tmp)
+    local efh = io.open(errf, "r")
+    local err = efh and efh:read("*a") or ""
+    if efh then efh:close() end
+    os.remove(errf)
+    if (not raw or raw == "") and err ~= "" then
+        return nil, "controller_client: remote error: " .. err:gsub("%s+$", ""):sub(1, 200)
+    end
     return raw
 end
 
@@ -118,7 +131,14 @@ else:
     if not raw or raw == "" then
         return nil, "controller_client: past_actions empty / unreachable"
     end
-    return (raw:gsub("%s+$", "")), nil
+    local tip = raw:gsub("%s+$", "")
+    -- A Redis stream id is "<ms>-<seq>". Reject anything else so a stray ssh
+    -- transport error can never be stored as the cursor (which wedges every
+    -- later xrange with an invalid "(<garbage>" min). Caller keeps its old tip.
+    if not tip:match("^%d+%-%d+$") then
+        return nil, "controller_client: past_actions tip not a stream id: " .. tip:sub(1, 120)
+    end
+    return tip, nil
 end
 
 -- past_actions_xrange(last_id, count_max, opts) — entries newer than last_id.
@@ -130,9 +150,12 @@ function M.past_actions_xrange(last_id, count_max, opts)
     local ssh_host  = opts.ssh_host  or DEFAULT_SSH_HOST
     local timeout_s = opts.timeout_s or DEFAULT_SSH_TIMEOUT
     local min_id = "-"
-    if last_id and last_id ~= "" then
+    if last_id and last_id:match("^%d+%-%d+$") then
         min_id = "(" .. last_id   -- exclusive of last_id (Redis ≥ 6.2)
     end
+    -- A non-stream-id last_id (poisoned cursor) falls through to min="-": full
+    -- replay self-heals the cursor on the next successful poll instead of
+    -- wedging forever on a redis "Invalid stream ID".
     local n = count_max or 200
     local py = string.format([[
 import redis, msgpack, json, sys
