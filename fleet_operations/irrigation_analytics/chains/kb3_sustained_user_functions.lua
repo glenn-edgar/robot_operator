@@ -28,8 +28,8 @@ local KB3           = require("kb3_sustained")
 local KB4V2         = require("kb4_v2")    -- read-only access to baselines_kb4v2 for secondary trip
 local NOTIFY        = require("notifications")
 local WsCommand     = require("ws_command")
-local WellDrawdown  = require("well_drawdown")   -- monitor-only, parallel to leak
-local ClogFilter    = require("clog_filter")     -- monitor-only clogged-filter detector
+local WellDrawdown  = require("well_drawdown")   -- kept only for WAIT_JOB (the 1:39 recharge)
+local FlowDeplete   = require("flow_deplete")    -- unified Hunter-only flow-depletion detector
 local app_heartbeat = require("app_heartbeat")
 
 local NOTIFY_DB_PATH = os.getenv("NOTIFY_DB_PATH") or "/var/fleet/notify/notifications.db"
@@ -39,13 +39,13 @@ local KB3_ARM_KILL = (os.getenv("KB3_ARM_KILL") == "1")
 -- well-exhaustion). Default OFF so their thresholds are validated on real
 -- alerts before they're allowed to close the master (Glenn 2026-06-10).
 local KB3_HYDRAULIC_ARM = (os.getenv("KB3_HYDRAULIC_ARM") == "1")
--- Well-drawdown actuation gate: on trigger, rpush the 1:39 wait recharge
--- (/ajax/irrigation_queue_front) then SKIP_STATION. Default OFF.
-local KB3_WELL_ARM = (os.getenv("KB3_WELL_ARM") == "1")
--- Clogged-filter actuation gate: on trigger, SKIP the step then rpush IN REVERSE
--- [reinsert-step, CLEAN_FILTER, wait] so the queue pops [wait, CLEAN_FILTER,
--- reinsert]. Default OFF — monitor-only logs what it WOULD do until validated.
-local KB3_CLOG_ARM = (os.getenv("KB3_CLOG_ARM") == "1")
+-- Flow-depletion actuation gate (the unified Hunter-only detector). On trigger:
+-- rpush(reinsert step) + rpush(1:39 wait) then SKIP_STATION, so the controller
+-- pops [wait -> re-run step]. Default OFF = monitor-only (logs what it WOULD do).
+-- Replaces the retired KB3_WELL_ARM: the old PLC well-drawdown false-skipped
+-- healthy stations on the sand-fouled meter (2026-06-21), so PLC is out and the
+-- Filtered Hunter is the sole trigger.
+local KB3_FLOW_ARM = (os.getenv("KB3_FLOW_ARM") == "1")
 
 local M = { main = {}, one_shot = {}, boolean = {} }
 
@@ -92,6 +92,10 @@ M.one_shot.KB3_TICK = function(handle, _node)
             last_stream_id = nil,
             initialized = false,
             arming = nil,
+            -- anti-loop: steps we've already done one flow-deplete wait+retry for
+            -- (keyed "schedule:step"). A reinserted step that's STILL depleting must
+            -- NOT trigger again — one wait+retry per step, then let it run.
+            flow_acted = {},
         }
     end
     local st = bb._kb3
@@ -173,14 +177,12 @@ M.one_shot.KB3_TICK = function(handle, _node)
                     station_step  = ent.details.step,
                     run_time      = tonumber(ent.details.run_time),
                     started_sid   = ent.stream_id,
-                    io_setup      = io_setup,   -- kept for the clog reinsert job (when armed)
+                    io_setup      = io_setup,   -- kept to build the reinsert job on a flow-deplete trip
                     prev_elapsed  = nil,
                     consecutive   = 0,
                     fired         = false,
-                    -- monitor-only well-drawdown detector state (pcall-isolated)
-                    well_state    = WellDrawdown.new_station(),
-                    -- monitor-only clogged-filter detector state (pcall-isolated)
-                    clog_state    = ClogFilter.new_station(),
+                    -- unified Hunter-only flow-depletion detector state (pcall-isolated)
+                    flow_state    = FlowDeplete.new_station(),
                 }
                 log(id, "STATION_START bin=%s sched=%s step=%s (ETO%s%s — armed)",
                     bin_key,
@@ -199,23 +201,7 @@ M.one_shot.KB3_TICK = function(handle, _node)
         elseif ent.action == "IRRIGATION_STEP_COMPLETE"
             or ent.action == "SKIP_OPERATION" then
             if st.arming then
-                log(id, "STEP_COMPLETE/SKIP bin=%s — disarming",
-                    st.arming.bin)
-                -- record this station's well plateau as the well's demonstrated
-                -- cycle capacity (rolling median of last 6) — the floor
-                -- reference for the NEXT station (catches an already-dry start).
-                pcall(function()
-                    local ws = st.arming.well_state
-                    if ws and ws.plateau then
-                        st.well_plateaus = st.well_plateaus or {}
-                        st.well_plateaus[#st.well_plateaus + 1] = ws.plateau
-                        while #st.well_plateaus > 6 do table.remove(st.well_plateaus, 1) end
-                        local c = {}
-                        for i = 1, #st.well_plateaus do c[i] = st.well_plateaus[i] end
-                        table.sort(c)
-                        st.well_cycle_cap = c[math.floor((#c + 1) / 2)]
-                    end
-                end)
+                log(id, "STEP_COMPLETE/SKIP bin=%s — disarming", st.arming.bin)
             end
             st.arming = nil
         end
@@ -244,97 +230,79 @@ M.one_shot.KB3_TICK = function(handle, _node)
     local plc     = tonumber(popup.PLC_FLOW_METER)
     local hunter  = tonumber(popup.FILTERED_HUNTER_VALVE)
 
-    -- MONITOR-ONLY well-drawdown detector, in PARALLEL with the leak check
-    -- below. Reads the same raw well-source flow (plc). Runs once per new
-    -- minute. pcall-isolated: a fault here must NEVER disturb the armed leak
-    -- path that shares this tick. It logs only what it WOULD do (rpush the
-    -- 15-min `wait` recovery + SKIP); the actuation is wired separately, later.
-    -- City-backed bins (1:39 in spec) are EXCLUDED from the well-drawdown detector
-    -- entirely: city water augments the well, so a PLC sag is expected (city carries
-    -- the load), not a dying well — and the recharge action (insert a 1:39 wait) is
-    -- redundant when 1:39 is already running. Field checks are ALWAYS city-backed, so
-    -- this also stops the actuator from skipping a station you're inspecting. Skipping
-    -- observe() also keeps city plateaus OUT of the cap median (well_state.plateau stays
-    -- nil → not recorded at STEP_COMPLETE) so cap reflects true well-only capacity.
-    if elapsed and st.arming.well_state and not st.arming.is_city
-       and st.arming.well_last_min ~= elapsed then
-        st.arming.well_last_min = elapsed
+    -- ===================================================================
+    -- UNIFIED FLOW-DEPLETION detector (Hunter-only) — Glenn 2026-06-21.
+    -- Replaces BOTH old low-flow detectors (PLC well-drawdown + Hunter clog-
+    -- filter) with ONE that keys off the Filtered Hunter ALONE. PLC is gone: it
+    -- is sand-fouled and reads false-0 on well runs, which made the armed PLC
+    -- well-drawdown false-skip 5 healthy stations (06-20/21). Whatever the cause —
+    -- a clogging filter (restriction) or a well drawing down (source dying) — the
+    -- symptom that matters is the SAME: delivery (Hunter) depletes. We act on the
+    -- symptom; PLC can't be trusted to name the cause.
+    --
+    -- Runs once per new minute, pcall-isolated so a fault can NEVER disturb the
+    -- armed leak path (KB3.evaluate_step) below. is_city steps EXCLUDED (a 1:39
+    -- recharge/flush delivers ~0 Hunter → would false-trip; a field-checked station
+    -- is city-backed too).
+    --
+    -- ACTION on a trip (KB3_FLOW_ARM): SKIP the step, but first rpush the recovery
+    -- so the controller (rpop = front) runs it NEXT. rpush ORDER is the REVERSE of
+    -- run order, so push the step FIRST, then the wait:
+    --   1. rpush(reinsert)  -- this step, re-queued to retry
+    --   2. rpush(wait)      -- the 15-min 1:39 city wait (well rests / line settles)
+    -- → controller pops [wait → reinsert]; then SKIP_STATION ends the depleting step
+    -- so the queue advances into the wait. Monitor-only (gate off) logs the exact
+    -- jobs it WOULD rpush and posts nothing. One wait+retry per step (anti-loop).
+    if elapsed and st.arming.flow_state and not st.arming.is_city
+       and st.arming.flow_last_min ~= elapsed then
+        st.arming.flow_last_min = elapsed
         pcall(function()
-            local cap = st.well_cycle_cap   -- from PRIOR stations this cycle
-            local r = WellDrawdown.observe(st.arming.well_state, plc, hunter, elapsed,
-                { run_time = st.arming.run_time, cycle_capacity = cap })
-            -- INTERNAL LEAK (PLC>>HUNTER, loss between meters) — supply-line break;
-            -- also the EARLY well-drawdown warning (the over-draw precursor).
-            if r.internal_leak then
-                log(id, "INTERNAL-LEAK [monitor] bin=%s min=%s PLC=%.1f HUNTER=%.1f div=%+.1f (ref %+.1f) -> supply-line loss ~%.1f GPM; EARLY WELL-DRAWDOWN WARNING",
-                    st.arming.bin, tostring(elapsed), plc or 0, hunter or 0,
-                    r.div or 0, r.div_ref or 0, r.div or 0)
-            end
-            -- WELL DRAWDOWN (retuned: onset/2-consec OR 3-of-4 window; SEVERE if HUNTER drops)
+            local r = FlowDeplete.observe(st.arming.flow_state, hunter, elapsed,
+                { baseline_gpm = st.arming.baseline_gpm, run_time = st.arming.run_time })
             if r.would_trigger then
-                log(id, "WELL-DRAWDOWN%s bin=%s min=%s PLC=%.1f plateau=%.1f frac=%.2f consec=%d hits=%d/%d cap=%s remain=%s reason=%s",
-                    r.severe and " SEVERE(downstream-starving)" or "",
-                    st.arming.bin, tostring(elapsed), plc or 0, r.plateau or 0,
-                    r.frac or 0, r.below_consec or 0, r.hits or 0, WellDrawdown.WINDOW,
-                    cap and string.format("%.1f", cap) or "nil",
-                    st.arming.run_time and tostring(st.arming.run_time - elapsed) or "?",
-                    tostring(r.reason))
-                -- ACTUATE (KB3_WELL_ARM): rpush the 1:39 wait recharge (runs NEXT)
-                -- then SKIP the current over-drawing step. GUARD (run_time-min>1)
-                -- already applied in observe(). Fires once/station (well_state.triggered).
-                if KB3_WELL_ARM then
-                    local jok, jcode, jerr = WsCommand.queue_front(WellDrawdown.WAIT_JOB,
+                -- Anti-loop: if we already did one wait+retry for this step, let the
+                -- reinserted run finish — a real clog/drawdown recovers after one; a
+                -- step still depleting after that is the head/valve, not flow.
+                local skey = tostring(st.arming.schedule or "") .. ":" .. tostring(st.arming.station_step or "")
+                if st.flow_acted[skey] then
+                    log(id, "flow-deplete bin=%s step=%s already acted once → NOT re-acting (anti-loop; %s)",
+                        st.arming.bin, tostring(st.arming.station_step), tostring(r.reason))
+                    return
+                end
+                st.flow_acted[skey] = true
+                -- byte-matched reinsert job for THIS step (full re-run after the wait)
+                local reinsert = FlowDeplete.reinsert_job({
+                    schedule = st.arming.schedule, step = st.arming.station_step,
+                    io_setup = st.arming.io_setup, run_time = st.arming.run_time })
+                if KB3_FLOW_ARM then
+                    -- reverse rpush: step first, then wait → pops [wait → re-run step]
+                    local rok = WsCommand.queue_front(reinsert,
                         { logger = function(m) log(id, "[ws] %s", m) end })
-                    log(id, "WELL-DRAWDOWN ARMED bin=%s: rpush wait → ok=%s code=%s err=%s",
-                        st.arming.bin, tostring(jok), tostring(jcode), tostring(jerr))
-                    local sok, scode, serr = WsCommand.post("SKIP_STATION", {
+                    local wok = WsCommand.queue_front(WellDrawdown.WAIT_JOB,
+                        { logger = function(m) log(id, "[ws] %s", m) end })
+                    local sok = WsCommand.post("SKIP_STATION", {
                         schedule_name = st.arming.schedule or "",
                         step          = tostring(st.arming.station_step or ""),
                         logger        = function(m) log(id, "[ws] %s", m) end })
-                    log(id, "WELL-DRAWDOWN ARMED bin=%s: SKIP_STATION → ok=%s code=%s err=%s",
-                        st.arming.bin, tostring(sok), tostring(scode), tostring(serr))
+                    log(id, "FLOW-DEPLETE ARMED bin=%s min=%s reason=%s HUNTER_med=%.1f base=%.1f ratio=%.2f"
+                        .. " → rpush reinsert(%s) + rpush wait(%s) + SKIP(%s)",
+                        st.arming.bin, tostring(elapsed), tostring(r.reason),
+                        r.hun_med or 0, r.baseline or 0, r.ratio or 0,
+                        tostring(rok), tostring(wok), tostring(sok))
                 else
-                    log(id, "WELL-DRAWDOWN [monitor] bin=%s: KB3_WELL_ARM off → WOULD rpush wait + SKIP | wait=%s",
-                        st.arming.bin, WellDrawdown.WAIT_JOB)
+                    log(id, "FLOW-DEPLETE [monitor] bin=%s min=%s reason=%s HUNTER_med=%.1f base=%.1f ratio=%.2f"
+                        .. " → WOULD rpush reinsert + rpush wait + SKIP (KB3_FLOW_ARM off)\n    reinsert=%s\n    wait=%s",
+                        st.arming.bin, tostring(elapsed), tostring(r.reason),
+                        r.hun_med or 0, r.baseline or 0, r.ratio or 0,
+                        reinsert, WellDrawdown.WAIT_JOB)
                 end
             elseif r.below then
-                log(id, "well-drawdown [monitor] bin=%s min=%s PLC=%.1f plateau=%.1f frac=%.2f consec=%d hits=%d/%d below%s",
-                    st.arming.bin, tostring(elapsed), plc or 0, r.plateau or 0,
-                    r.frac or 0, r.below_consec or 0, r.hits or 0, WellDrawdown.WINDOW,
-                    r.guard_ok and "" or " (guard-blocked)")
-            end
-        end)
-    end
-
-    -- MONITOR-ONLY clogged-filter detector, in PARALLEL with the leak +
-    -- well-drawdown checks. SENSOR = Filtered Hunter (delivered flow); a clogged
-    -- well/main filter starves delivery so Hunter sags below the bin's clean
-    -- baseline while the well source is fine. PLC is deliberately NOT used here
-    -- (sand-fouled, reads false-0 on well runs → would false-fire). Validated vs
-    -- the 06-19/06-20 manual `clean filter` events (4:10 5.0→7.7, 4:11 4.2→7.4).
-    -- is_city steps are EXCLUDED (a 1:39 recharge/flush delivers ~0 Hunter →
-    -- would false-trip). Logs what the clean-filter routine WOULD do; actuates
-    -- nothing. pcall-isolated so a fault can't disturb the armed leak path.
-    if elapsed and st.arming.clog_state and not st.arming.is_city
-       and st.arming.clog_last_min ~= elapsed then
-        st.arming.clog_last_min = elapsed
-        pcall(function()
-            local r = ClogFilter.observe(st.arming.clog_state, hunter, elapsed,
-                { baseline_gpm = st.arming.baseline_gpm, run_time = st.arming.run_time })
-            if r.would_trigger then
-                -- The clean-filter routine (wired later, behind KB3_CLOG_ARM): SKIP
-                -- this step, then queue_front IN REVERSE [reinsert-step, CLEAN_FILTER,
-                -- wait] so the controller pops [wait → CLEAN_FILTER → reinsert]. Once/step.
-                log(id, "CLOG-FILTER [monitor] bin=%s min=%s HUNTER_med=%.1f baseline=%.1f ratio=%.2f (<%.2f) "
-                    .. "→ WOULD: SKIP step %s, then rpush REVERSE so queue pops [wait 1:39 15m → CLEAN_FILTER → reinsert %s] "
-                    .. "(once/step; KB3_CLOG_ARM=%s)",
-                    st.arming.bin, tostring(elapsed), r.hun_med or 0, r.baseline or 0,
-                    r.ratio or 0, ClogFilter.TRIP_FRAC,
-                    tostring(st.arming.station_step), st.arming.bin, tostring(KB3_CLOG_ARM))
-            elseif r.below then
-                log(id, "clog-filter [monitor] bin=%s min=%s HUNTER_med=%.1f baseline=%.1f ratio=%.2f below (%s)",
-                    st.arming.bin, tostring(elapsed), r.hun_med or 0, r.baseline or 0,
-                    r.ratio or 0, tostring(r.reason))
+                log(id, "flow-deplete [watch] bin=%s min=%s HUNTER=%s plateau=%s base=%s ratio=%s (%s)",
+                    st.arming.bin, tostring(elapsed),
+                    hunter and string.format("%.1f", hunter) or "nil",
+                    r.plateau and string.format("%.1f", r.plateau) or "-",
+                    r.baseline and string.format("%.1f", r.baseline) or "-",
+                    r.ratio and string.format("%.2f", r.ratio) or "-", tostring(r.reason))
             end
         end)
     end

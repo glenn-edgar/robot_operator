@@ -74,6 +74,21 @@ the container.
   real deficits are understated. Arming needs a clean-filter-aware baseline refresh, and the
   CLEAN_FILTER + reinsert job formats (byte-matched, like WAIT_JOB) still need capturing.
 - **`clean filter` is a logged PAST_ACTIONS action** (level RED) and a `mode_change` verb.
+- **DESIGN PRINCIPLE (Glenn 2026-06-21): HUNTER is the source of truth; PLC never triggers
+  an action by itself.** Hunter good + PLC bad → KEEP RUNNING, ignore PLC. A real well
+  drawdown drops Hunter too, so the Hunter detector catches it; PLC (when trustworthy) only
+  hints which remedy (Hunter-low + PLC-low ⇒ recharge; Hunter-low + PLC-normal ⇒ clean filter).
+- **DISARMED `KB3_WELL_ARM` 2026-06-21** (Pi fleet.env → 0; backup `fleet.env.bak.well-arm-on`).
+  The armed PLC-based well-drawdown detector was FALSE-SKIPPING healthy stations on the
+  sand-fouled meter: 5 skips in 30h (steps 4,24,26,28,30) where PLC read 0/intermittent while
+  Hunter delivered a healthy 7–8 GPM (e.g. 3:13 PLC=0 all run, Hunter ramped to 7.0 — skipped
+  anyway). Well-drawdown is now monitor-only; KB3_ARM_KILL (Hunter leak) + KB1 stay armed.
+  The well-drawdown (PLC) and clog-filter (Hunter) were "two detectors doing the same thing"
+  → **DONE: consolidated into `lib/flow_deplete.lua`** (deployed `0.51-flow-consolidate`,
+  monitor-only). Hunter-ONLY; trips on depletion (Hunter drops below its own early-run plateau)
+  OR low-vs-baseline; on trip does `rpush(reinsert step)`+`rpush(1:39 wait)`+`SKIP` (queue pops
+  [wait → re-run step]), one wait+retry per step (anti-loop). Gate `KB3_FLOW_ARM` (default OFF;
+  `KB3_WELL_ARM` retired). Watch: `ssh robot 'docker logs irrigation-analytics 2>&1 | grep -iE FLOW-DEPLETE'`.
 
 ## FIXED + DEPLOYED (prod `0.49-cursor-fix`, 2026-06-20) — clog/flow analysis blind: POISONED CURSOR (root-caused 2026-06-20)
 - **DEPLOYED to the Pi 2026-06-20**: image `irrigation-analytics:0.49-cursor-fix` built,
