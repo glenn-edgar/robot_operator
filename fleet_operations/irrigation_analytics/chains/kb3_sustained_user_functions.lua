@@ -29,6 +29,7 @@ local KB4V2         = require("kb4_v2")    -- read-only access to baselines_kb4v
 local NOTIFY        = require("notifications")
 local WsCommand     = require("ws_command")
 local WellDrawdown  = require("well_drawdown")   -- monitor-only, parallel to leak
+local ClogFilter    = require("clog_filter")     -- monitor-only clogged-filter detector
 local app_heartbeat = require("app_heartbeat")
 
 local NOTIFY_DB_PATH = os.getenv("NOTIFY_DB_PATH") or "/var/fleet/notify/notifications.db"
@@ -41,6 +42,10 @@ local KB3_HYDRAULIC_ARM = (os.getenv("KB3_HYDRAULIC_ARM") == "1")
 -- Well-drawdown actuation gate: on trigger, rpush the 1:39 wait recharge
 -- (/ajax/irrigation_queue_front) then SKIP_STATION. Default OFF.
 local KB3_WELL_ARM = (os.getenv("KB3_WELL_ARM") == "1")
+-- Clogged-filter actuation gate: on trigger, SKIP the step then rpush IN REVERSE
+-- [reinsert-step, CLEAN_FILTER, wait] so the queue pops [wait, CLEAN_FILTER,
+-- reinsert]. Default OFF — monitor-only logs what it WOULD do until validated.
+local KB3_CLOG_ARM = (os.getenv("KB3_CLOG_ARM") == "1")
 
 local M = { main = {}, one_shot = {}, boolean = {} }
 
@@ -168,11 +173,14 @@ M.one_shot.KB3_TICK = function(handle, _node)
                     station_step  = ent.details.step,
                     run_time      = tonumber(ent.details.run_time),
                     started_sid   = ent.stream_id,
+                    io_setup      = io_setup,   -- kept for the clog reinsert job (when armed)
                     prev_elapsed  = nil,
                     consecutive   = 0,
                     fired         = false,
                     -- monitor-only well-drawdown detector state (pcall-isolated)
                     well_state    = WellDrawdown.new_station(),
+                    -- monitor-only clogged-filter detector state (pcall-isolated)
+                    clog_state    = ClogFilter.new_station(),
                 }
                 log(id, "STATION_START bin=%s sched=%s step=%s (ETO%s%s — armed)",
                     bin_key,
@@ -294,6 +302,39 @@ M.one_shot.KB3_TICK = function(handle, _node)
                     st.arming.bin, tostring(elapsed), plc or 0, r.plateau or 0,
                     r.frac or 0, r.below_consec or 0, r.hits or 0, WellDrawdown.WINDOW,
                     r.guard_ok and "" or " (guard-blocked)")
+            end
+        end)
+    end
+
+    -- MONITOR-ONLY clogged-filter detector, in PARALLEL with the leak +
+    -- well-drawdown checks. SENSOR = Filtered Hunter (delivered flow); a clogged
+    -- well/main filter starves delivery so Hunter sags below the bin's clean
+    -- baseline while the well source is fine. PLC is deliberately NOT used here
+    -- (sand-fouled, reads false-0 on well runs → would false-fire). Validated vs
+    -- the 06-19/06-20 manual `clean filter` events (4:10 5.0→7.7, 4:11 4.2→7.4).
+    -- is_city steps are EXCLUDED (a 1:39 recharge/flush delivers ~0 Hunter →
+    -- would false-trip). Logs what the clean-filter routine WOULD do; actuates
+    -- nothing. pcall-isolated so a fault can't disturb the armed leak path.
+    if elapsed and st.arming.clog_state and not st.arming.is_city
+       and st.arming.clog_last_min ~= elapsed then
+        st.arming.clog_last_min = elapsed
+        pcall(function()
+            local r = ClogFilter.observe(st.arming.clog_state, hunter, elapsed,
+                { baseline_gpm = st.arming.baseline_gpm, run_time = st.arming.run_time })
+            if r.would_trigger then
+                -- The clean-filter routine (wired later, behind KB3_CLOG_ARM): SKIP
+                -- this step, then queue_front IN REVERSE [reinsert-step, CLEAN_FILTER,
+                -- wait] so the controller pops [wait → CLEAN_FILTER → reinsert]. Once/step.
+                log(id, "CLOG-FILTER [monitor] bin=%s min=%s HUNTER_med=%.1f baseline=%.1f ratio=%.2f (<%.2f) "
+                    .. "→ WOULD: SKIP step %s, then rpush REVERSE so queue pops [wait 1:39 15m → CLEAN_FILTER → reinsert %s] "
+                    .. "(once/step; KB3_CLOG_ARM=%s)",
+                    st.arming.bin, tostring(elapsed), r.hun_med or 0, r.baseline or 0,
+                    r.ratio or 0, ClogFilter.TRIP_FRAC,
+                    tostring(st.arming.station_step), st.arming.bin, tostring(KB3_CLOG_ARM))
+            elseif r.below then
+                log(id, "clog-filter [monitor] bin=%s min=%s HUNTER_med=%.1f baseline=%.1f ratio=%.2f below (%s)",
+                    st.arming.bin, tostring(elapsed), r.hun_med or 0, r.baseline or 0,
+                    r.ratio or 0, tostring(r.reason))
             end
         end)
     end

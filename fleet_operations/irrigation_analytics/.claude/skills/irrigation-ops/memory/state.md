@@ -53,6 +53,28 @@ the container.
   alert "clean well meter" + auto-suppress PLC-based well/leak detectors. Verified live
   06-19 ~20:00 (29/30 samples PLC=0, Hunter 6–7), no false actuation that run.
 
+## CLOGGED-FILTER signature + monitor (validated 2026-06-20, deployed `0.50-clog-monitor`)
+- **The clogged well/main filter starves DELIVERY: Filtered Hunter sags below the bin's
+  clean baseline while the well source is fine. Discriminator = HUNTER vs baseline, NOT
+  PLC** — the PLC well meter is sand-fouled (false-0 on well runs), so any PLC/divergence
+  rule false-fires. (Confirms Glenn: "the sensor is the Filtered Hunter.")
+- **VALIDATED against the operator's manual clean-filter events 06-19/06-20** (clear sched →
+  `clean filter` → re-queue, done 4×: 06-19 14:32, 06-20 08:02/16:11/16:14). Same valves
+  recovered right after each clean: **4:10 5.0→7.7 GPM, 4:11 4.2→7.4 GPM** (base 9.69/5.79).
+  Healthy steps deliver **0.85–0.92×** baseline; clog candidates **0.50–0.78×**. The filter
+  re-clogs progressively across a cycle (4:4 0.63, 4:7 0.66, 3:18 0.71, 2:13 0.73, 2:15 0.75).
+- **MONITOR deployed (log-only):** `lib/clog_filter.lua` + a block in
+  `chains/kb3_sustained_user_functions.lua`, mirroring the well-drawdown monitor. Per ETO
+  step (is_city excluded), median Hunter over min 5–15 (judged from min 9 to dodge the
+  Filtered-Hunter lag); trips once/step at **Hunter < 0.75× baseline**. Logs `CLOG-FILTER
+  [monitor] … WOULD: SKIP step, then rpush REVERSE [wait 1:39 15m → CLEAN_FILTER → reinsert]`.
+  Gate `KB3_CLOG_ARM` (default OFF) for later arming. Watch:
+  `ssh robot 'docker logs irrigation-analytics 2>&1 | grep -i CLOG-FILTER'`.
+- **CAVEAT:** baselines are clog-depressed (4:11 base 5.79 < its post-clean 7.4 = 1.28×), so
+  real deficits are understated. Arming needs a clean-filter-aware baseline refresh, and the
+  CLEAN_FILTER + reinsert job formats (byte-matched, like WAIT_JOB) still need capturing.
+- **`clean filter` is a logged PAST_ACTIONS action** (level RED) and a `mode_change` verb.
+
 ## FIXED + DEPLOYED (prod `0.49-cursor-fix`, 2026-06-20) — clog/flow analysis blind: POISONED CURSOR (root-caused 2026-06-20)
 - **DEPLOYED to the Pi 2026-06-20**: image `irrigation-analytics:0.49-cursor-fix` built,
   pushed, pulled on Pi, `fleet.env` IMAGE_TAG bumped, container relaunched. Verified live:
