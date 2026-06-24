@@ -21,6 +21,10 @@ cjson.encode_empty_table_as_object(false)
 local LOCATOR = os.getenv("ZENOH_LOCATOR") or "tcp/127.0.0.1:7447"
 local HOST    = os.getenv("GATEWAY_HOST")  or "127.0.0.1"
 local PORT    = tonumber(os.getenv("GATEWAY_PORT")) or 8080
+-- Where the root path lands. This gateway is shared across complexes: the
+-- irrigation complex sets GATEWAY_HOME_PATH=/irrigation, the generic
+-- multi-robot fleet complex (farm_soil + rancho_water) defaults to /fleet.
+local HOME_PATH = os.getenv("GATEWAY_HOME_PATH") or "/fleet"
 
 local function log(fmt, ...)
     io.stderr:write(string.format("APPGW: " .. fmt .. "\n", ...))
@@ -76,10 +80,10 @@ end
 
 local srv = http.new({ host = HOST, port = PORT, log_fn = log })
 
--- Root lands on the irrigation dashboard (this is the irrigation complex).
--- The generic multi-robot fleet view stays reachable at /fleet.
+-- Root lands on this complex's home page (GATEWAY_HOME_PATH): /irrigation
+-- for the irrigation complex, /fleet (the generic multi-robot SPA) otherwise.
 srv:route("GET", "/", function(_req)
-    return 302, { "Location: /irrigation" }, ""
+    return 302, { "Location: " .. HOME_PATH }, ""
 end)
 
 -- Generic fleet dashboard (the multi-robot SPA).
