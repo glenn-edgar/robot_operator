@@ -76,6 +76,7 @@ function M.new_station()
         steady_samples = {},    -- Hunter over min 10-15 (post-ramp)
         steady         = nil,    -- the run's settled delivery (fixed once set)
         drop_consec    = 0,      -- consecutive minutes below DRAW_FRAC*steady (path A)
+        onset_min      = nil,    -- elapsed minute the current drop streak began (path A)
         triggered      = false,  -- fired once this step
     }
 end
@@ -105,9 +106,13 @@ function M.observe(state, hunter, elapsed, opts)
     out.hun_med = state.steady
     if base and base > 1 then out.ratio = state.steady / base end
 
-    -- PATH A — depletion vs the run's OWN steady level (self-referencing)
+    -- PATH A — depletion vs the run's OWN steady level (self-referencing).
+    -- Record onset_min = the FIRST minute of the current sustained drop streak, so
+    -- the retry can re-run from when delivery started degrading (not just from the
+    -- skip minute) and make up the weak-flow minutes too.
     local deplete = false
     if hunter < M.DRAW_FRAC * state.steady then
+        if state.drop_consec == 0 then state.onset_min = elapsed end
         state.drop_consec = state.drop_consec + 1
     else
         state.drop_consec = 0
@@ -128,6 +133,10 @@ function M.observe(state, hunter, elapsed, opts)
 
     state.triggered   = true
     out.would_trigger = true
+    -- onset for the retry length: Path A → when the drop streak began (delivery
+    -- started degrading); Path B (low-from-start) → 0, the run never delivered so
+    -- re-run the whole step.
+    out.onset_min = deplete and (state.onset_min or elapsed) or 0
     return out
 end
 
