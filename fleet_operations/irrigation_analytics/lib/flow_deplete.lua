@@ -136,18 +136,24 @@ end
 -- IRRIGATION_PENDING entry 2026-06-21:
 --   {"type":"IRRIGATION_STEP","schedule_name":"house","step":4,
 --    "io_setup":[{"remote":"satellite_2","bits":[6]}],"run_time":5,
---    "elasped_time":0,"eto_enable":false,"eto_list":null,"eto_flag":false}
--- "elasped_time" is misspelled ON PURPOSE (the controller's wire key). eto_* are
--- false/null even for ETO schedules — the ETO resolution already baked the run_time
--- when the schedule was built, so a re-queued step re-runs the same minutes. JSON
--- key order inside io_setup is irrelevant to the parser.
+--    "elasped_time":0,"eto_enable":true,"eto_list":null,"eto_flag":true}
+-- "elasped_time" is misspelled ON PURPOSE (the controller's wire key).
+-- ETO MONITORING (Glenn 2026-06-24): eto_enable/eto_flag = TRUE so the well-
+-- depletion retry is ETO-monitored. The controller re-runs determine_eto_management
+-- at POP-TO-RUN for any eto_flag==true job (irrigation_queue_processing_py3.py:312),
+-- so it corrects run_time itself — the retry runs only the REMAINING ET need, not a
+-- blind full re-run. We still front-push (queue_front) so it runs next after the
+-- wait+clean. eto_list stays null: the pop-to-run handler recomputes run_time but
+-- discards the rebuilt list, so per-minute eto_list accounting is a controller-side
+-- gap (run DURATION is correctly ET-bounded). JSON key order inside io_setup is
+-- irrelevant to the parser.
 --   opts = { schedule, step, io_setup (lua array), run_time }
 function M.reinsert_job(opts)
     opts = opts or {}
     local io_json = cjson.encode(opts.io_setup or {})
     return string.format(
         '{"type":"IRRIGATION_STEP","schedule_name":"%s","step":%d,"io_setup":%s,' ..
-        '"run_time":%d,"elasped_time":0,"eto_enable":false,"eto_list":null,"eto_flag":false}',
+        '"run_time":%d,"elasped_time":0,"eto_enable":true,"eto_list":null,"eto_flag":true}',
         tostring(opts.schedule or ""), tonumber(opts.step) or 0, io_json,
         tonumber(opts.run_time) or 0)
 end
