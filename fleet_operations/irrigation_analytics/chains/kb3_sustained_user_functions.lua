@@ -272,10 +272,19 @@ M.one_shot.KB3_TICK = function(handle, _node)
                     return
                 end
                 st.flow_acted[skey] = true
-                -- byte-matched reinsert job for THIS step (full re-run after the wait)
+                -- Re-run only the REMAINING time = scheduled run_time − minutes already
+                -- run (Glenn 2026-06-24). The first attempt already delivered `elapsed`
+                -- minutes, so re-queuing the full run_time over-waters. The ETO path
+                -- couldn't fix this: a front-pushed job gets no eto_list, so the
+                -- controller neither re-resolves run_time (3:1 ran 48 not 0) nor credits
+                -- the deficit (stayed at 0.025). The time-difference is exact,
+                -- deterministic, and needs no controller cooperation.
+                local full_rt      = tonumber(st.arming.run_time) or 0
+                local remaining_rt = math.max(1, full_rt - (tonumber(elapsed) or 0))
+                -- byte-matched reinsert job for THIS step (remainder re-run after the wait)
                 local reinsert = FlowDeplete.reinsert_job({
                     schedule = st.arming.schedule, step = st.arming.station_step,
-                    io_setup = st.arming.io_setup, run_time = st.arming.run_time })
+                    io_setup = st.arming.io_setup, run_time = remaining_rt })
                 if KB3_FLOW_ARM then
                     -- reverse rpush: step, then CLEAN_FILTER, then wait →
                     -- pops [wait → CLEAN_FILTER → re-run step]
@@ -289,10 +298,10 @@ M.one_shot.KB3_TICK = function(handle, _node)
                         schedule_name = st.arming.schedule or "",
                         step          = tostring(st.arming.station_step or ""),
                         logger        = function(m) log(id, "[ws] %s", m) end })
-                    log(id, "FLOW-DEPLETE ARMED bin=%s min=%s reason=%s HUNTER_med=%.1f base=%.1f ratio=%.2f"
+                    log(id, "FLOW-DEPLETE ARMED bin=%s min=%s reason=%s HUNTER_med=%.1f base=%.1f ratio=%.2f reinsert_rt=%d/%d"
                         .. " → rpush reinsert(%s) + rpush CLEAN_FILTER(%s) + rpush wait(%s) + SKIP(%s)",
                         st.arming.bin, tostring(elapsed), tostring(r.reason),
-                        r.hun_med or 0, r.baseline or 0, r.ratio or 0,
+                        r.hun_med or 0, r.baseline or 0, r.ratio or 0, remaining_rt, full_rt,
                         tostring(rok), tostring(cok), tostring(wok), tostring(sok))
                 else
                     log(id, "FLOW-DEPLETE [monitor] bin=%s min=%s reason=%s HUNTER_med=%.1f base=%.1f ratio=%.2f"
