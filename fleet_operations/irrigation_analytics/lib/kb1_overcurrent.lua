@@ -28,12 +28,16 @@ local M = {}
 -- =========================================================================
 -- Thresholds (overridable via env in class_spec.kb1_overcurrent)
 -- =========================================================================
--- Irrigation rail lowered 1.8→1.5 A (Glenn 2026-06-26): a single spike above
--- this both KILLS the run AND latches the bin's solenoid(s) BAD — the spike is
--- an intermittent short arcing through, an event waiting to happen even though
--- the coil reseats and runs fine afterward. 1.5 A still clears the largest
--- healthy bin (~1.3 A, the 3:11/3:12/1:39 triple). Override via KB1_IRR_KILL_A.
-M.IRR_KILL_A = tonumber(os.getenv("KB1_IRR_KILL_A")) or 1.5   -- irrigation rail
+-- Irrigation rail is BIN-AWARE (Glenn 2026-06-26). A spike above the bin's
+-- threshold both KILLS the run AND latches the solenoid(s) BAD (an intermittent
+-- short — an event waiting to happen even though the coil reseats afterward).
+-- Two thresholds because IRRIGATION_CURRENT is a summed bus: a non-city bin
+-- (solo/pair, ~0.9–1.3 A) gets the sensitive 1.5 A; a CITY bin (contains 1:39 —
+-- master + city coil + up to 3 valves, legitimately ~1.50 A) gets 1.8 A so it
+-- can't false-kill. The caller resolves the running step's valves, checks for
+-- satellite_1:39, and passes the right one to classify().
+M.IRR_KILL_A      = tonumber(os.getenv("KB1_IRR_KILL_A"))      or 1.5  -- non-city bins
+M.IRR_KILL_CITY_A = tonumber(os.getenv("KB1_IRR_KILL_CITY_A")) or 1.8  -- city bins (1:39)
 -- Equipment rail raised 1.2→1.8 A (Glenn 2026-06-15): still wiring-safe. The
 -- equipment-current reading carries a quasi-periodic ~0.4 A excursion that is
 -- NOT a real load (constant load, only relays switch; uniform across all
@@ -49,10 +53,13 @@ M.EQ_KILL_A  = tonumber(os.getenv("KB1_EQ_KILL_A")) or 1.8   -- equipment rail
 -- Returns (cls, severity, excess, note).
 --   cls:      OK | KB1_IRR_KILL | KB1_EQ_KILL
 --   excess:   amps above the threshold that fired
-function M.classify(irr_I, eq_I)
-    if irr_I and irr_I > M.IRR_KILL_A then
-        return "KB1_IRR_KILL", "critical", irr_I - M.IRR_KILL_A,
-            string.format("IRR=%.2f A > %.1f A absolute threshold", irr_I, M.IRR_KILL_A)
+-- irr_kill: per-bin irrigation threshold (caller passes 1.5 non-city / 1.8 city);
+-- defaults to the non-city value.
+function M.classify(irr_I, eq_I, irr_kill)
+    irr_kill = irr_kill or M.IRR_KILL_A
+    if irr_I and irr_I > irr_kill then
+        return "KB1_IRR_KILL", "critical", irr_I - irr_kill,
+            string.format("IRR=%.2f A > %.1f A absolute threshold", irr_I, irr_kill)
     end
     if eq_I and eq_I > M.EQ_KILL_A then
         return "KB1_EQ_KILL", "critical", eq_I - M.EQ_KILL_A,

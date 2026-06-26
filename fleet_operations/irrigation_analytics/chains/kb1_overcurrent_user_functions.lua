@@ -100,8 +100,8 @@ M.one_shot.KB1_TICK = function(handle, _node)
                 ts_ms INTEGER, eq_i REAL, irr_i REAL, step INTEGER, sched TEXT)]])
         end)
         pcall(function() kb_alerts.ensure_schema(db) end)  -- spike-latch → 18:00 digest
-        log(id, "db ready at %s (armed=%s, IRR_KILL=%.1fA EQ_KILL=%.1fA)",
-            db_path, tostring(KB1_ARM_KILL), KB1.IRR_KILL_A, KB1.EQ_KILL_A)
+        log(id, "db ready at %s (armed=%s, IRR_KILL=%.1fA non-city / %.1fA city(1:39) EQ_KILL=%.1fA)",
+            db_path, tostring(KB1_ARM_KILL), KB1.IRR_KILL_A, KB1.IRR_KILL_CITY_A, KB1.EQ_KILL_A)
     end
     local db = st.db
 
@@ -123,6 +123,28 @@ M.one_shot.KB1_TICK = function(handle, _node)
     local step   = tonumber(popup.STEP) or 0
     local sched  = popup.SCHEDULE_NAME or "?"
 
+    -- BIN-AWARE THRESHOLD (Glenn 2026-06-26): resolve the running step's valves
+    -- ONCE per step-change (one ssh) and check for the city valve 1:39. City bins
+    -- (master + city coil + up to 3 valves, legit ~1.50 A) use 1.8 A; non-city
+    -- bins use the sensitive 1.5 A. Cache the valves for the spike-latch too. On
+    -- resolve failure default to CITY (1.8, the safe/higher one — never false-kill).
+    if step ~= st.city_checked_step then
+        st.city_checked_step = step
+        st.step_is_city = true            -- safe default until resolved
+        st.step_valves  = nil
+        pcall(function()
+            local valves = controller.schedule_step_valves(sched, step,
+                { ssh_host = ssh_host, timeout_s = cfg.timeout_s or 8 })
+            if valves and #valves > 0 then
+                st.step_valves = valves
+                local city = false
+                for _, v in ipairs(valves) do if v == "satellite_1:39" then city = true end end
+                st.step_is_city = city
+            end
+        end)
+    end
+    local irr_kill = st.step_is_city and KB1.IRR_KILL_CITY_A or KB1.IRR_KILL_A
+
     -- EQ SAMPLER (monitor-only): one timestamped row per tick (~30 s) so we can
     -- read the quasi-period of the equipment-current excursion (suspected
     -- step-down/measurement noise off the 732's separate 5 V rail, NOT a real
@@ -136,7 +158,7 @@ M.one_shot.KB1_TICK = function(handle, _node)
         end
     end)
 
-    local cls, sev, excess, note = KB1.classify(irr_I, eq_I)
+    local cls, sev, excess, note = KB1.classify(irr_I, eq_I, irr_kill)
 
     -- Re-arm: if we previously fired and current is back below threshold,
     -- count consecutive below-threshold ticks. After 2 ticks, allow next
@@ -180,11 +202,15 @@ M.one_shot.KB1_TICK = function(handle, _node)
     -- pcall-isolated: must NEVER disturb the armed kill path below.
     if cls == "KB1_IRR_KILL" then
         pcall(function()
-            local valves, verr = controller.schedule_step_valves(sched, step,
-                { ssh_host = ssh_host, timeout_s = cfg.timeout_s or 8 })
+            -- reuse the valves resolved at step-change; re-resolve only if missing
+            local valves = st.step_valves
             if not valves or #valves == 0 then
-                log(id, "spike-latch: could not resolve valves for %s step %s (%s)",
-                    tostring(sched), tostring(step), tostring(verr))
+                valves = controller.schedule_step_valves(sched, step,
+                    { ssh_host = ssh_host, timeout_s = cfg.timeout_s or 8 })
+            end
+            if not valves or #valves == 0 then
+                log(id, "spike-latch: could not resolve valves for %s step %s",
+                    tostring(sched), tostring(step))
                 return
             end
             local bdb = BadSprinklers.open()
@@ -199,12 +225,13 @@ M.one_shot.KB1_TICK = function(handle, _node)
                         severity = "alert", target = v,
                         summary = string.format(
                             "BAD solenoid — IRR spike %.2f A > %.1f kill (sched=%s step=%s); replace",
-                            irr_I, KB1.IRR_KILL_A, tostring(sched), tostring(step)) })
+                            irr_I, irr_kill, tostring(sched), tostring(step)) })
                 end)
             end
             bdb:close()
-            log(id, "SPIKE-LATCH bad solenoid(s): %s (IRR=%.2f A > %.1f) sched=%s step=%s",
-                table.concat(valves, ","), irr_I, KB1.IRR_KILL_A, tostring(sched), tostring(step))
+            log(id, "SPIKE-LATCH bad solenoid(s): %s (IRR=%.2f A > %.1f %s) sched=%s step=%s",
+                table.concat(valves, ","), irr_I, irr_kill,
+                st.step_is_city and "city" or "non-city", tostring(sched), tostring(step))
         end)
     end
 
