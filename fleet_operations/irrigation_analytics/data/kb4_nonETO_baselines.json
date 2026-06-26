@@ -140,7 +140,7 @@
     "warn_down": -2.0,
     "n_all": 49,
     "n_kept": 5,
-    "phantom": false
+    "phantom": true
   },
   "satellite_3:19": {
     "flow_med": 5.0,
@@ -426,7 +426,7 @@
     "warn_down": 8.0,
     "n_all": 33,
     "n_kept": 21,
-    "phantom": false
+    "phantom": true
   },
   "satellite_2:5/satellite_1:39": {
     "flow_med": 4.0,
