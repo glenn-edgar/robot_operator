@@ -26,6 +26,7 @@ local DB_PATHS = {
     kb2_wr = os.getenv("KB2_WR_DB_PATH") or "/var/fleet/kb2_wr/kb2_wr.db",
     kb4    = os.getenv("KB4_DB_PATH")    or "/var/fleet/kb4/kb4.db",
     notify = os.getenv("NOTIFY_DB_PATH") or "/var/fleet/notify/notifications.db",
+    bad    = os.getenv("BAD_SPRINKLERS_DB_PATH") or "/var/fleet/kb1/bad_sprinklers.db",
 }
 
 local function open_ro(path)
@@ -1439,6 +1440,19 @@ local function load_watch_list()
     return out
 end
 
+-- Bad solenoids — latched by KB1 on a >1.5 A irrigation-current spike (an
+-- intermittent short). Sticky until a replace_solenoid/replace_valve field log
+-- clears it. One row per still-bad valve in bad_sprinklers.db.
+local function load_bad_solenoids()
+    local db = open_ro(DB_PATHS.bad)
+    if not db then return {} end
+    local out = query(db, [[
+        SELECT valve, spike_count, peak_irr, schedule, step, last_ms
+        FROM bad_sprinklers WHERE cleared=0 ORDER BY last_ms DESC ]]) or {}
+    db:close()
+    return out
+end
+
 -- Onset spike groups (within-run; co-energized additions cancel)
 local SPIKE_TAG = {
     SPIKE_SEVERE = "t-bad", SPIKE_STRONG = "t-warn", SPIKE_MILD = "t-warn", FLAT = "t-info",
@@ -1567,6 +1581,29 @@ local function view_coil(_req)
 </div>
 ]], #wrows, table.concat(wrows)) or ""
 
+    -- BAD solenoids — latched by KB1 on a >1.5 A irrigation-current spike.
+    -- Sticky until a replace_solenoid/replace_valve field log clears it.
+    local bad = load_bad_solenoids()
+    local brows = {}
+    for _, b in ipairs(bad) do
+        brows[#brows + 1] = string.format(
+            '<tr><td>%s</td><td style="text-align:right"><span class="tag t-bad">%s A</span></td>'
+            .. '<td style="text-align:right">%s</td><td>%s/%s</td><td class="tiny">%s</td></tr>',
+            esc(b.valve), num(b.peak_irr, 2), tostring(b.spike_count or 1),
+            esc(b.schedule or "?"), tostring(b.step or "?"), esc(pdt_from_ms(b.last_ms)))
+    end
+    local bad_html = #brows > 0 and string.format([[
+<div class="panel">
+<div class="panel-h">🚨 Bad solenoids — REPLACE (%d)</div>
+<div class="panel-b"><table><thead><tr>
+<th>Valve</th><th>Peak IRR</th><th>Spikes</th><th>Sched/step</th><th>Last spike</th></tr></thead>
+<tbody>%s</tbody></table>
+<p class="tiny" style="margin-top:8px">KB1 latched these on an irrigation-current spike
+&gt; the kill threshold (intermittent short). They still run, but each is an event waiting to
+happen. Clears when you log a <b>replace_solenoid</b> field action for the valve.</p></div>
+</div>
+]], #brows, table.concat(brows)) or ""
+
     local table_html = (ok and #trows > 0) and string.format([[
 <table>
 <thead><tr>
@@ -1579,6 +1616,7 @@ local function view_coil(_req)
         '<p class="tiny">No solved data yet — accumulates as valves run, or the backfill has not been applied.</p>'
 
     local body = string.format([[
+%s
 %s
 <div class="panel">
 <div class="panel-h">Per-coil current — least-squares decomposition</div>
@@ -1597,7 +1635,7 @@ is the weak-coil / high-R signal. <b>Onset</b> is the within-run first-minute sp
 (additions cancel) — informational.
 </p></div>
 </div>
-]], watch_html, hdr, #connected, table_html)
+]], bad_html, watch_html, hdr, #connected, table_html)
 
     return html_response(layout("Coil onset", "/irrigation/coil", body, { refresh_s = 300 }))
 end
