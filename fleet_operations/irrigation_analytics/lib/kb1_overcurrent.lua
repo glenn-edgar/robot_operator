@@ -28,7 +28,12 @@ local M = {}
 -- =========================================================================
 -- Thresholds (overridable via env in class_spec.kb1_overcurrent)
 -- =========================================================================
-M.IRR_KILL_A = 1.8   -- irrigation rail
+-- Irrigation rail lowered 1.8→1.5 A (Glenn 2026-06-26): a single spike above
+-- this both KILLS the run AND latches the bin's solenoid(s) BAD — the spike is
+-- an intermittent short arcing through, an event waiting to happen even though
+-- the coil reseats and runs fine afterward. 1.5 A still clears the largest
+-- healthy bin (~1.3 A, the 3:11/3:12/1:39 triple). Override via KB1_IRR_KILL_A.
+M.IRR_KILL_A = tonumber(os.getenv("KB1_IRR_KILL_A")) or 1.5   -- irrigation rail
 -- Equipment rail raised 1.2→1.8 A (Glenn 2026-06-15): still wiring-safe. The
 -- equipment-current reading carries a quasi-periodic ~0.4 A excursion that is
 -- NOT a real load (constant load, only relays switch; uniform across all

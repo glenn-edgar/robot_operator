@@ -170,6 +170,7 @@ M.digest = {
         os.getenv("KB2_DB_PATH")    or "/var/fleet/kb2/kb2.db",
         os.getenv("KB2_WR_DB_PATH") or "/var/fleet/kb2_wr/kb2_wr.db",
         os.getenv("KB4V2_DB_PATH")  or "/var/fleet/kb4v2/kb4v2.db",  -- blocked-sprinkler (kind=clog)
+        os.getenv("KB1_DB_PATH")    or "/var/fleet/kb1/kb1.db",      -- overcurrent spike-latch (kind=spike)
     },
 }
 

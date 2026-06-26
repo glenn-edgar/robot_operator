@@ -125,7 +125,20 @@ local function apply_reset(db, bin, action, check_ts)
         end
         parts[#parts+1] = string.format("flow rebaselined (%d post-change runs)", n)
     end
-    if NEEDS_COIL[action] then reset_coil(db, bin); parts[#parts+1] = "coil_onset reset" end
+    if NEEDS_COIL[action] then
+        reset_coil(db, bin); parts[#parts+1] = "coil_onset reset"
+        -- replace_solenoid / replace_valve also clears the latched BAD flag KB1 set
+        -- on an irrigation-current spike (the new coil is presumed good).
+        pcall(function()
+            local BS = require("bad_sprinklers")
+            local bdb = BS.open()
+            if bdb then
+                local cleared = BS.clear(bdb, bin, (check_ts and check_ts ~= 0) and check_ts or 0)
+                bdb:close()
+                if cleared and cleared > 0 then parts[#parts+1] = "bad-solenoid flag cleared" end
+            end
+        end)
+    end
     if NEEDS_WATCH[action] then clear_watch(db, bin); parts[#parts+1] = "watch cleared" end
     if #parts == 0 then parts[#parts+1] = "no-op (record only)" end
     return true, table.concat(parts, "; ")

@@ -25,6 +25,8 @@ local KB1           = require("kb1_overcurrent")
 local NOTIFY        = require("notifications")
 local WsCommand     = require("ws_command")
 local app_heartbeat = require("app_heartbeat")
+local BadSprinklers = require("bad_sprinklers")
+local kb_alerts     = require("kb_alerts")
 
 local NOTIFY_DB_PATH = os.getenv("NOTIFY_DB_PATH") or "/var/fleet/notify/notifications.db"
 
@@ -97,6 +99,7 @@ M.one_shot.KB1_TICK = function(handle, _node)
             db:exec([[CREATE TABLE IF NOT EXISTS eq_samples (
                 ts_ms INTEGER, eq_i REAL, irr_i REAL, step INTEGER, sched TEXT)]])
         end)
+        pcall(function() kb_alerts.ensure_schema(db) end)  -- spike-latch → 18:00 digest
         log(id, "db ready at %s (armed=%s, IRR_KILL=%.1fA EQ_KILL=%.1fA)",
             db_path, tostring(KB1_ARM_KILL), KB1.IRR_KILL_A, KB1.EQ_KILL_A)
     end
@@ -167,6 +170,43 @@ M.one_shot.KB1_TICK = function(handle, _node)
 
     -- FIRE
     st.fired = true
+
+    -- LATCH BAD SOLENOID (Glenn 2026-06-26) — an irrigation-current spike is an
+    -- intermittent short; the coil reseats and runs fine next time, so the SPIKE
+    -- EVENT is the verdict. Resolve the running valve(s) from schedule+step (both
+    -- off the popup; schedule file maps step→io_setup) and latch them BAD. Latches
+    -- on EVERY irr spike, armed or not (it's a diagnosis, independent of whether
+    -- we actuated). Cleared only by a replace_solenoid/replace_valve field log.
+    -- pcall-isolated: must NEVER disturb the armed kill path below.
+    if cls == "KB1_IRR_KILL" then
+        pcall(function()
+            local valves, verr = controller.schedule_step_valves(sched, step,
+                { ssh_host = ssh_host, timeout_s = cfg.timeout_s or 8 })
+            if not valves or #valves == 0 then
+                log(id, "spike-latch: could not resolve valves for %s step %s (%s)",
+                    tostring(sched), tostring(step), tostring(verr))
+                return
+            end
+            local bdb = BadSprinklers.open()
+            if not bdb then return end
+            for _, v in ipairs(valves) do
+                BadSprinklers.latch(bdb, v,
+                    { ts_ms = now_ms(), peak_irr = irr_I, schedule = sched, step = step })
+                -- surface in the 18:00 digest (kb1.db is in its kb_db_paths)
+                pcall(function()
+                    kb_alerts.record(db, {
+                        ts_ms = now_ms(), source = "kb1", kind = "spike",
+                        severity = "alert", target = v,
+                        summary = string.format(
+                            "BAD solenoid — IRR spike %.2f A > %.1f kill (sched=%s step=%s); replace",
+                            irr_I, KB1.IRR_KILL_A, tostring(sched), tostring(step)) })
+                end)
+            end
+            bdb:close()
+            log(id, "SPIKE-LATCH bad solenoid(s): %s (IRR=%.2f A > %.1f) sched=%s step=%s",
+                table.concat(valves, ","), irr_I, KB1.IRR_KILL_A, tostring(sched), tostring(step))
+        end)
+    end
 
     -- Action dispatch order: CLOSE_MASTER_VALVE first (stops water),
     -- then SKIP_STATION (advances queue). Both gated by KB1_ARM_KILL.

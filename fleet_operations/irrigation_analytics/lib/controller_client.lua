@@ -362,4 +362,43 @@ sys.stdout.write(json.dumps({"samples": out}))
     return decoded.samples or {}
 end
 
+-- schedule_step_valves(schedule_name, step, opts) — resolve the valve(s) running
+-- at a given schedule+step (both come straight off the popup) to a list of
+-- "remote:bit" strings, by reading the controller's schedule definition file
+-- ~/nano_data_center/code/app_data_files/<schedule>.json. The popup STEP is
+-- 1-BASED; the schedule list is 0-based → index = step-1. Each schedule entry is
+-- [[remote, [bits], runtime], ...]. Returns {valves}, nil  or  nil, err.
+function M.schedule_step_valves(schedule_name, step, opts)
+    opts = opts or {}
+    local ssh_host  = opts.ssh_host  or DEFAULT_SSH_HOST
+    local timeout_s = opts.timeout_s or DEFAULT_SSH_TIMEOUT
+    if not schedule_name or schedule_name == "" then return nil, "no schedule" end
+    local idx = (tonumber(step) or 0) - 1
+    if idx < 0 then return nil, "bad step" end
+    local py = string.format([[
+import json, sys, os
+name = %q
+idx  = %d
+path = os.path.expanduser("~/nano_data_center/code/app_data_files/" + name + ".json")
+try:
+    sch = json.load(open(path))["schedule"]
+except Exception as e:
+    sys.stdout.write(json.dumps({"_error": "load " + name + ": " + str(e)})); sys.exit(0)
+if idx >= len(sch):
+    sys.stdout.write(json.dumps({"_error": "step out of range"})); sys.exit(0)
+vs = []
+for g in sch[idx]:
+    remote = g[0]; bits = g[1]
+    for b in bits:
+        vs.append("%%s:%%s" %% (remote, b))
+sys.stdout.write(json.dumps({"valves": vs}))
+]], schedule_name, idx)
+    local raw = run_remote_python(ssh_host, timeout_s, py)
+    if not raw or raw == "" then return nil, "schedule ssh empty" end
+    local ok, decoded = pcall(cjson.decode, raw)
+    if not ok then return nil, "schedule decode failed: " .. raw:sub(1, 120) end
+    if decoded._error then return nil, decoded._error end
+    return decoded.valves or {}
+end
+
 return M
