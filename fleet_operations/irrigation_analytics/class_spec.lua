@@ -156,24 +156,25 @@ M.kb4_v2 = {
     rolling_n = tonumber(os.getenv("KB4V2_ROLLING_N") or "7"),
 }
 
--- KB5 filter-load — PLC-source filter/line-restriction detector (Glenn
--- 2026-06-26). The complement to kb3's Hunter-only flow_deplete: it acts on the
--- bins flow_deplete does NOT (gate-in = is_city OR not is_eto_bin) and keys off
--- the PLC well-source meter with a mandatory Hunter cross-check. PLC + Hunter
--- falling in LOCKSTEP = filter/line restriction → recovery = wait + CLEAN_FILTER
--- + rpush the run_time remainder + SKIP. Rate-gated to one clean per 90 min
--- (global action; persisted in kb5_meta so a restart keeps the cooldown).
--- Monitor-first: KB5_FILTER_ARM default OFF — validate on real filter-load
--- cycles before arming. db_path lives on the writable bind mount.
+-- KB5 PLC-meter sand-foul detector (Glenn 2026-06-28). Keys off the PLC: if it
+-- DROPS (upstream well-source meter reads low) while the smooth/filtered Hunter is
+-- STILL FLOWING (downstream delivery is fine), the PLC meter/filter is sand-fouled
+-- — the well IS delivering (Hunter proves it), so a low upstream reading is the
+-- meter, not a real flow loss → ONE CLEAN_FILTER to flush it, run NOT skipped.
+-- The complement flow_deplete is blind to (flow_deplete handles PLC+Hunter BOTH
+-- dropping = real delivery loss → clean+retry+skip). Scope = NON-CITY bins (a city
+-- bin's low PLC + flowing Hunter could be city water). Rate-gated to one clean per
+-- 90 min (persisted in kb5_meta so a restart keeps the cooldown). db_path lives on
+-- the writable bind mount.
 M.kb5_filter = {
     ssh_host      = os.getenv("IRRIGATION_CONTROLLER_HOST") or "pi@irrigation",
     timeout_s     = 8,
     poll_s        = tonumber(os.getenv("IRRIGATION_KB5_POLL_S") or "30"),
     db_path       = os.getenv("KB5_DB_PATH") or "/var/fleet/kb5/kb5.db",
     -- detector tunables (override lib/plc_filter.lua defaults if set)
-    plc_drop_frac = tonumber(os.getenv("KB5_PLC_DROP_FRAC") or "0.50"),
-    hun_drop_frac = tonumber(os.getenv("KB5_HUN_DROP_FRAC") or "0.70"),
-    onset_consec  = tonumber(os.getenv("KB5_ONSET_CONSEC")  or "3"),
+    plc_low_gpm   = tonumber(os.getenv("KB5_PLC_LOW_GPM")  or "3.0"),  -- PLC "dropped" below this
+    hun_flow_gpm  = tonumber(os.getenv("KB5_HUN_FLOW_GPM") or "4.0"),  -- smooth Hunter "still flowing" above this
+    onset_consec  = tonumber(os.getenv("KB5_ONSET_CONSEC") or "3"),
 }
 
 -- Daily KB2/KB4 operator digest (Glenn 2026-06-10). At/after hour_pacific

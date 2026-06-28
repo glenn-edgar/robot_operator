@@ -107,8 +107,8 @@ exec docker run -d \
     -e KB4_CURVE_ARM="${KB4_CURVE_ARM:-0}" \
     -e KB1_EQ_KILL_A="${KB1_EQ_KILL_A:-1.8}" \
     -e KB5_FILTER_ARM="${KB5_FILTER_ARM:-0}" \
-    -e KB5_PLC_DROP_FRAC="${KB5_PLC_DROP_FRAC:-0.50}" \
-    -e KB5_HUN_DROP_FRAC="${KB5_HUN_DROP_FRAC:-0.70}" \
+    -e KB5_PLC_LOW_GPM="${KB5_PLC_LOW_GPM:-3.0}" \
+    -e KB5_HUN_FLOW_GPM="${KB5_HUN_FLOW_GPM:-4.0}" \
     -e KB5_ONSET_CONSEC="${KB5_ONSET_CONSEC:-3}" \
     -e KB5_COOLDOWN_MIN="${KB5_COOLDOWN_MIN:-90}" \
     "$IMAGE_TAG"
