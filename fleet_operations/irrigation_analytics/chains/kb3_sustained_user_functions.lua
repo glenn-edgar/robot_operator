@@ -55,7 +55,11 @@ local KB3_FLOW_ARM = (os.getenv("KB3_FLOW_ARM") == "1")
 local KB3_FOUL_ARM = (os.getenv("KB3_FOUL_ARM") == "1")
     or (os.getenv("KB5_FILTER_ARM") == "1")
 if os.getenv("KB3_PLC_LOW_GPM")  then PlcFilter.PLC_LOW_GPM  = tonumber(os.getenv("KB3_PLC_LOW_GPM")) end
-if os.getenv("KB3_HUN_FLOW_GPM") then PlcFilter.HUN_FLOW_GPM = tonumber(os.getenv("KB3_HUN_FLOW_GPM")) end
+if os.getenv("KB3_HUN_FLOW_GPM") then
+    local v = tonumber(os.getenv("KB3_HUN_FLOW_GPM"))
+    PlcFilter.HUN_FLOW_GPM    = v   -- "Hunter still flowing" for the foul detector
+    KB3.WELL_HUNTER_FLOOR_GPM = v   -- same threshold suppresses false WELL_EXHAUSTION
+end
 -- SHARED filter-clean rate-gate (ms). BOTH the flow-deplete recovery and the
 -- PLC-foul clean consult + update kb3.db kb3_meta.last_clean_ms through this, so
 -- one loading-filter event produces ONE clean, not two (Glenn 2026-06-28).

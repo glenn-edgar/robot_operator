@@ -98,6 +98,13 @@ M.DIVERGENCE_GPM      = 8.0    -- fire if (PLC - Hunter) > this for N consec min
 -- is wired.
 M.WELL_ARMED_GPM      = 8.0    -- guard arms once PLC exceeds this
 M.WELL_FLOOR_GPM      = 4.0    -- fire if PLC < this for N consec min once armed
+-- Hunter cross-check (Glenn 2026-06-28): a PLC collapse while the smooth Hunter is
+-- STILL FLOWING above this is a SAND-FOULED METER (delivery is fine), not a dying
+-- well — that's the PLC-foul clean's job, so DON'T raise a WELL_EXHAUSTION alarm.
+-- Only treat a PLC collapse as exhaustion when delivery (Hunter) is ALSO starved
+-- below this. Kept in lockstep with the foul detector's HUN_FLOW_GPM (env
+-- KB3_HUN_FLOW_GPM) by the call site. Fixes the recurring false RED on every foul.
+M.WELL_HUNTER_FLOOR_GPM = 4.0
 
 -- ETO valve membership. Mirror of farm-side eto_site_setup.json — these
 -- are the 20 pins that run on the No_city_water schedule. Non-ETO bins
@@ -255,7 +262,11 @@ function M.evaluate_step(arming, elapsed, plc, hunter)
     --     sustained drop below WELL_FLOOR_GPM (protects the pump; lets the well
     --     recover). PLC-collapse proxy until WELL_PRESSURE is wired.
     if plc_val > M.WELL_ARMED_GPM then arming.well_flowing = true end
-    local well_trip = arming.well_flowing and (plc_val < M.WELL_FLOOR_GPM) or false
+    -- Hunter cross-check: a PLC collapse with Hunter STILL FLOWING is a fouled meter,
+    -- not exhaustion — only count the trip when delivery (Hunter) is ALSO starved.
+    local hunter_starved = hunter_val < M.WELL_HUNTER_FLOOR_GPM
+    local well_trip = arming.well_flowing
+        and (plc_val < M.WELL_FLOOR_GPM) and hunter_starved or false
     arming.well_consec = well_trip and ((arming.well_consec or 0) + 1) or 0
 
     -- First trip to reach the consecutive gate fires; all three close the master.
