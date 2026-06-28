@@ -23,7 +23,6 @@ local kb1_overcurrent = require("kb1_overcurrent")
 local kb2_within_run = require("kb2_within_run")
 local kb3_sustained = require("kb3_sustained")
 local kb4_v2 = require("kb4_v2")
-local kb5_filter = require("kb5_filter")
 local digest = require("digest")
 
 if #arg ~= 1 then
@@ -41,7 +40,6 @@ kb1_overcurrent.build_kb1_overcurrent(ct, kb1_overcurrent.KB1_OVERCURRENT_KB_NAM
 kb2_within_run.build_kb2_within_run(ct, kb2_within_run.KB2_WITHIN_RUN_KB_NAME)
 kb3_sustained.build_kb3_sustained(ct, kb3_sustained.KB3_SUSTAINED_KB_NAME)
 kb4_v2.build_kb4_v2(ct, kb4_v2.KB4_V2_KB_NAME)
-kb5_filter.build_kb5_filter(ct, kb5_filter.KB5_FILTER_KB_NAME)
 digest.build_digest(ct, digest.DIGEST_KB_NAME)
 ct:check_and_generate()
 print("Wrote: " .. arg[1])

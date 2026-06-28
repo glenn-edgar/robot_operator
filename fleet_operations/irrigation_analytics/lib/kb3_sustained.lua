@@ -348,6 +348,16 @@ CREATE TABLE IF NOT EXISTS runs_kb3 (
     note            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_kb3_ts ON runs_kb3(ts_ms);
+
+-- key/val store. Holds last_clean_ms = ms timestamp of the last CLEAN_FILTER this
+-- KB issued (either the flow-deplete recovery OR the PLC-foul clean). It is the
+-- SHARED filter-clean rate-gate: both clean paths consult + update it so one
+-- loading-filter event produces ONE clean, not two. Persisted so a restart keeps
+-- the cooldown.
+CREATE TABLE IF NOT EXISTS kb3_meta (
+    key TEXT PRIMARY KEY,
+    val INTEGER
+);
 ]]
 
 function M.open_db(path)
@@ -365,6 +375,25 @@ function M.open_db(path)
         return nil, "schema migration failed: " .. tostring(msg)
     end
     return db
+end
+
+-- Shared filter-clean cooldown (see kb3_meta above).
+function M.get_last_clean_ms(db)
+    local v = nil
+    for row in db:nrows("SELECT val FROM kb3_meta WHERE key='last_clean_ms'") do
+        v = tonumber(row.val)
+    end
+    return v
+end
+
+function M.set_last_clean_ms(db, ts_ms)
+    local stmt = db:prepare(
+        "INSERT OR REPLACE INTO kb3_meta(key,val) VALUES('last_clean_ms',?)")
+    if not stmt then return nil, db:errmsg() end
+    stmt:bind_values(tonumber(ts_ms) or 0)
+    stmt:step()
+    stmt:finalize()
+    return true
 end
 
 function M.insert_eval(db, fields)

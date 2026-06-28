@@ -21,7 +21,7 @@ M.capabilities = {
 
 M.app_kbs = { "monitor", "detector", "kb4_clog", "kb2_resistance",
               "kb1_overcurrent", "kb2_within_run", "kb3_sustained",
-              "kb4_v2", "kb5_filter", "digest" }
+              "kb4_v2", "digest" }
 
 -- Controller config — where to fetch popup + past_actions from.
 -- Reused by lib/controller_client.lua (which wraps the SSH+python popup
@@ -156,26 +156,12 @@ M.kb4_v2 = {
     rolling_n = tonumber(os.getenv("KB4V2_ROLLING_N") or "7"),
 }
 
--- KB5 PLC-meter sand-foul detector (Glenn 2026-06-28). Keys off the PLC: if it
--- DROPS (upstream well-source meter reads low) while the smooth/filtered Hunter is
--- STILL FLOWING (downstream delivery is fine), the PLC meter/filter is sand-fouled
--- — the well IS delivering (Hunter proves it), so a low upstream reading is the
--- meter, not a real flow loss → ONE CLEAN_FILTER to flush it, run NOT skipped.
--- The complement flow_deplete is blind to (flow_deplete handles PLC+Hunter BOTH
--- dropping = real delivery loss → clean+retry+skip). Scope = NON-CITY bins (a city
--- bin's low PLC + flowing Hunter could be city water). Rate-gated to one clean per
--- 90 min (persisted in kb5_meta so a restart keeps the cooldown). db_path lives on
--- the writable bind mount.
-M.kb5_filter = {
-    ssh_host      = os.getenv("IRRIGATION_CONTROLLER_HOST") or "pi@irrigation",
-    timeout_s     = 8,
-    poll_s        = tonumber(os.getenv("IRRIGATION_KB5_POLL_S") or "30"),
-    db_path       = os.getenv("KB5_DB_PATH") or "/var/fleet/kb5/kb5.db",
-    -- detector tunables (override lib/plc_filter.lua defaults if set)
-    plc_low_gpm   = tonumber(os.getenv("KB5_PLC_LOW_GPM")  or "3.0"),  -- PLC "dropped" below this
-    hun_flow_gpm  = tonumber(os.getenv("KB5_HUN_FLOW_GPM") or "4.0"),  -- smooth Hunter "still flowing" above this
-    onset_consec  = tonumber(os.getenv("KB5_ONSET_CONSEC") or "3"),
-}
+-- KB5 RETIRED 2026-06-28 — folded into kb3_sustained as the PLC-meter sand-foul
+-- clean. The two filter-clean triggers (Hunter-depletion via flow_deplete, and
+-- PLC-fouled-while-Hunter-flows) now live in ONE KB sharing a single filter-clean
+-- cooldown so one loading-filter event = one clean. Env knobs: KB3_FOUL_ARM
+-- (reads legacy KB5_FILTER_ARM as fallback), KB3_PLC_LOW_GPM, KB3_HUN_FLOW_GPM,
+-- KB3_FILTER_COOLDOWN_MIN. See lib/plc_filter.lua + chains/kb3_sustained_user_functions.lua.
 
 -- Daily KB2/KB4 operator digest (Glenn 2026-06-10). At/after hour_pacific
 -- (18:00 PT) once per day, rolls up the confirmed alert rows the KBs wrote
