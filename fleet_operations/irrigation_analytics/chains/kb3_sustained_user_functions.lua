@@ -31,6 +31,7 @@ local WsCommand     = require("ws_command")
 local WellDrawdown  = require("well_drawdown")   -- kept only for WAIT_JOB (the 1:39 recharge)
 local FlowDeplete   = require("flow_deplete")    -- unified Hunter-only flow-depletion detector
 local PlcFilter     = require("plc_filter")      -- PLC-meter sand-foul detector (folded in from kb5, 2026-06-28)
+local StateClassifier = require("state_classifier")  -- ACTIVE_RUN test for the boot retro-arm
 local app_heartbeat = require("app_heartbeat")
 
 local NOTIFY_DB_PATH = os.getenv("NOTIFY_DB_PATH") or "/var/fleet/notify/notifications.db"
@@ -89,6 +90,23 @@ end
 local function record_clean(st, db)
     st.last_clean_ms = now_ms()
     KB3.set_last_clean_ms(db, st.last_clean_ms)
+end
+
+-- Convert controller_client.schedule_step_valves output ({"remote:bit",...}) back
+-- into the io_setup shape KB3's classifiers expect ({ {remote=..., bits={...}}, ... }).
+-- Used by the boot retro-arm to classify the in-progress step.
+local function valves_to_io_setup(valves)
+    local by_remote, order = {}, {}
+    for _, v in ipairs(valves or {}) do
+        local remote, bit = tostring(v):match("^(.-):(%d+)$")
+        if remote and bit then
+            if not by_remote[remote] then by_remote[remote] = {}; order[#order + 1] = remote end
+            by_remote[remote][#by_remote[remote] + 1] = tonumber(bit)
+        end
+    end
+    local io = {}
+    for _, remote in ipairs(order) do io[#io + 1] = { remote = remote, bits = by_remote[remote] } end
+    return io
 end
 
 local function push_notify(ps, id, body)
@@ -179,6 +197,70 @@ M.one_shot.KB3_TICK = function(handle, _node)
         st.last_stream_id = tip
         st.initialized = true
         log(id, "past_actions cursor fast-forwarded to %s", tostring(tip))
+
+        -- RETRO-ARM on an in-progress step (Glenn 2026-06-28). A restart mid-run
+        -- otherwise leaves the CURRENT station unmonitored until it completes,
+        -- because we fast-forward the cursor past its STATION_START (proven gap:
+        -- a 0.62 deploy mid-run left a 59-min sand-foul on satellite_3:15 entirely
+        -- uncaught). So read the live popup and arm on whatever is running NOW.
+        -- pcall-isolated — any failure just falls back to the old behavior (arm on
+        -- the next STATION_START). Mirrors the STATION_START arming classification.
+        pcall(function()
+            local popup = controller.popup_get({ ssh_host = ssh_host, timeout_s = cfg.timeout_s or 8 })
+            if not popup then return end
+            local sched   = popup.SCHEDULE_NAME
+            local step    = popup.STEP
+            local elapsed = tonumber(popup.ELASPED_TIME)
+            -- only retro-arm on a genuine ACTIVE_RUN (same test the monitor uses:
+            -- SCHEDULE_NAME is a real schedule, not OFFLINE/CLEAN_FILTER/RESISTANCE).
+            -- Flow-independent — a running step can read 0 flow momentarily (step
+            -- start / line recharge / between steps), so don't gate on flow.
+            local state = StateClassifier.classify(popup, false)
+            if state ~= StateClassifier.states.ACTIVE_RUN or not step or not elapsed then
+                log(id, "boot: no active run to retro-arm (state=%s sched=%s) — will arm on next START",
+                    tostring(state), tostring(sched))
+                return
+            end
+            local valves, verr, run_time = controller.schedule_step_valves(sched, step,
+                { ssh_host = ssh_host, timeout_s = cfg.timeout_s or 8 })
+            if not valves or #valves == 0 then
+                log(id, "boot retro-arm: could not resolve %s step %s (%s) — will arm on next START",
+                    tostring(sched), tostring(step), tostring(verr))
+                return
+            end
+            local io_setup = valves_to_io_setup(valves)
+            local bin_key  = KB3.bin_key(io_setup)
+            local is_city  = KB3.is_city_bin(io_setup)
+            local is_eto   = KB3.is_eto_bin(io_setup)
+            if is_eto then
+                local baseline_gpm = nil
+                if st.kb4v2_db then
+                    local med, n = KB4V2.load_hunter_baseline(st.kb4v2_db, bin_key, 7)
+                    if med and n >= KB3.BASELINE_MIN_N_CLEAN then baseline_gpm = med end
+                end
+                st.arming = {
+                    bin = bin_key, is_city = is_city, baseline_gpm = baseline_gpm,
+                    schedule = sched, station_step = step, run_time = run_time,
+                    started_sid = tip, io_setup = io_setup, prev_elapsed = nil,
+                    consecutive = 0, fired = false,
+                    flow_state = FlowDeplete.new_station(),
+                    plc_state = PlcFilter.new_station(), foul_only = false,
+                }
+                log(id, "boot RETRO-ARM in-progress bin=%s sched=%s step=%s elapsed=%s rt=%s (ETO%s — armed mid-run)",
+                    bin_key, tostring(sched), tostring(step), tostring(elapsed),
+                    tostring(run_time), is_city and ", CITY" or "")
+            elseif not is_city then
+                st.arming = {
+                    bin = bin_key, is_city = false, foul_only = true,
+                    schedule = sched, station_step = step, run_time = run_time,
+                    io_setup = io_setup, plc_state = PlcFilter.new_station(),
+                }
+                log(id, "boot RETRO-ARM in-progress bin=%s sched=%s step=%s elapsed=%s rt=%s (non-ETO non-city — foul watch mid-run)",
+                    bin_key, tostring(sched), tostring(step), tostring(elapsed), tostring(run_time))
+            else
+                log(id, "boot: in-progress bin=%s is city — skipping (will arm on next START)", bin_key)
+            end
+        end)
     end
 
     -- Poll past_actions delta — process STATION_START / STEP_COMPLETE / SKIP

@@ -391,14 +391,20 @@ for g in sch[idx]:
     remote = g[0]; bits = g[1]
     for b in bits:
         vs.append("%%s:%%s" %% (remote, b))
-sys.stdout.write(json.dumps({"valves": vs}))
+rt = None
+try: rt = sch[idx][0][2]
+except Exception: rt = None
+sys.stdout.write(json.dumps({"valves": vs, "runtime": rt}))
 ]], schedule_name, idx)
     local raw = run_remote_python(ssh_host, timeout_s, py)
     if not raw or raw == "" then return nil, "schedule ssh empty" end
     local ok, decoded = pcall(cjson.decode, raw)
     if not ok then return nil, "schedule decode failed: " .. raw:sub(1, 120) end
     if decoded._error then return nil, decoded._error end
-    return decoded.valves or {}
+    -- 3rd return = the step's runtime (minutes), for callers that need it (e.g. the
+    -- kb3 boot retro-arm). Backward-compatible: existing `valves, err = f()` callers
+    -- ignore it.
+    return decoded.valves or {}, nil, tonumber(decoded.runtime)
 end
 
 return M
