@@ -21,7 +21,7 @@ M.capabilities = {
 
 M.app_kbs = { "monitor", "detector", "kb4_clog", "kb2_resistance",
               "kb1_overcurrent", "kb2_within_run", "kb3_sustained",
-              "kb4_v2", "digest" }
+              "kb4_v2", "kb5_filter", "digest" }
 
 -- Controller config — where to fetch popup + past_actions from.
 -- Reused by lib/controller_client.lua (which wraps the SSH+python popup
@@ -154,6 +154,26 @@ M.kb4_v2 = {
     poll_s    = tonumber(os.getenv("IRRIGATION_KB4V2_POLL_S") or "60"),
     db_path   = os.getenv("KB4V2_DB_PATH") or "/var/fleet/kb4v2/kb4v2.db",
     rolling_n = tonumber(os.getenv("KB4V2_ROLLING_N") or "7"),
+}
+
+-- KB5 filter-load — PLC-source filter/line-restriction detector (Glenn
+-- 2026-06-26). The complement to kb3's Hunter-only flow_deplete: it acts on the
+-- bins flow_deplete does NOT (gate-in = is_city OR not is_eto_bin) and keys off
+-- the PLC well-source meter with a mandatory Hunter cross-check. PLC + Hunter
+-- falling in LOCKSTEP = filter/line restriction → recovery = wait + CLEAN_FILTER
+-- + rpush the run_time remainder + SKIP. Rate-gated to one clean per 90 min
+-- (global action; persisted in kb5_meta so a restart keeps the cooldown).
+-- Monitor-first: KB5_FILTER_ARM default OFF — validate on real filter-load
+-- cycles before arming. db_path lives on the writable bind mount.
+M.kb5_filter = {
+    ssh_host      = os.getenv("IRRIGATION_CONTROLLER_HOST") or "pi@irrigation",
+    timeout_s     = 8,
+    poll_s        = tonumber(os.getenv("IRRIGATION_KB5_POLL_S") or "30"),
+    db_path       = os.getenv("KB5_DB_PATH") or "/var/fleet/kb5/kb5.db",
+    -- detector tunables (override lib/plc_filter.lua defaults if set)
+    plc_drop_frac = tonumber(os.getenv("KB5_PLC_DROP_FRAC") or "0.50"),
+    hun_drop_frac = tonumber(os.getenv("KB5_HUN_DROP_FRAC") or "0.70"),
+    onset_consec  = tonumber(os.getenv("KB5_ONSET_CONSEC")  or "3"),
 }
 
 -- Daily KB2/KB4 operator digest (Glenn 2026-06-10). At/after hour_pacific

@@ -39,6 +39,10 @@ mkdir -p "$FLEET_DATA_DIR/kb3"
 # KB4 v2 SQLite directory — PLC-based flow baseline (Glenn 2026-06-09 PM).
 mkdir -p "$FLEET_DATA_DIR/kb4v2"
 
+# KB5 SQLite directory — PLC filter-load detector (Glenn 2026-06-26); holds
+# evals/runs + kb5_meta.last_fire_ms (the 90-min cooldown persists across restarts).
+mkdir -p "$FLEET_DATA_DIR/kb5"
+
 # Notifications log — the robot's "past actions" (KB1/KB3 alerts + daily
 # digest); read by application_gateway for /irrigation/alerts (Glenn 2026-06-10).
 mkdir -p "$FLEET_DATA_DIR/notify"
