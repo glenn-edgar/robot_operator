@@ -27,7 +27,8 @@
 -- the only source, so Hunter flow PROVES the well is flowing and a low PLC = a
 -- meter/filter fault.
 --
--- RECOVERY (when armed, dispatched by the call site): queue ONE CLEAN_FILTER to
+-- RECOVERY (when armed, dispatched by the call site, Glenn 2026-06-29): a 15-min
+-- 1:39 wait/recharge FIRST, THEN ONE CLEAN_FILTER (controller pops [wait -> clean]),
 -- run next. NO skip and NO re-run — the station is delivering correctly; only the
 -- meter is fouled, so we must not interrupt a healthy watering step. Rate-gated to
 -- one clean per 90 min (the cooldown lives in the call site / kb5_meta).

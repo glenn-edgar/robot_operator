@@ -50,8 +50,9 @@ local KB3_HYDRAULIC_ARM = (os.getenv("KB3_HYDRAULIC_ARM") == "1")
 local KB3_FLOW_ARM = (os.getenv("KB3_FLOW_ARM") == "1")
 -- PLC-meter sand-foul clean gate (folded in from kb5, 2026-06-28). When the PLC
 -- well-source meter DROPS while the smooth Hunter is STILL FLOWING, the meter/
--- filter is sand-fouled (delivery is fine — Hunter proves it) → ONE CLEAN_FILTER,
--- NO skip. Default OFF = monitor-only. Reads the legacy KB5_FILTER_ARM as a
+-- filter is sand-fouled (delivery is fine — Hunter proves it) → 15-min 1:39 wait
+-- recharge THEN CLEAN_FILTER (Glenn 2026-06-29), NO skip. Default OFF = monitor-only.
+-- Reads the legacy KB5_FILTER_ARM as a
 -- fallback so an existing armed fleet.env keeps working.
 local KB3_FOUL_ARM = (os.getenv("KB3_FOUL_ARM") == "1")
     or (os.getenv("KB5_FILTER_ARM") == "1")
@@ -168,7 +169,7 @@ M.one_shot.KB3_TICK = function(handle, _node)
             db_path, tostring(KB3_ARM_KILL),
             KB3.GPM_THRESHOLD, KB3.WARMUP_MINUTES, KB3.CONSECUTIVE_REQUIRED,
             KB3.BASELINE_DELTA_GPM, KB3.BASELINE_MIN_N_CLEAN)
-        log(id, "filter cleans: flow_arm=%s foul_arm=%s (PLC<%.1f & smooth HUNTER>=%.1f for %d consec → CLEAN_FILTER, no skip), shared cooldown=%dmin last_clean=%s",
+        log(id, "filter cleans: flow_arm=%s foul_arm=%s (PLC<%.1f & smooth HUNTER>=%.1f for %d consec → wait+CLEAN_FILTER, no skip), shared cooldown=%dmin last_clean=%s",
             tostring(KB3_FLOW_ARM), tostring(KB3_FOUL_ARM),
             PlcFilter.PLC_LOW_GPM, PlcFilter.HUN_FLOW_GPM, PlcFilter.ONSET_CONSEC,
             FILTER_CLEAN_COOLDOWN_MS / 60000, tostring(st.last_clean_ms))
@@ -376,8 +377,9 @@ M.one_shot.KB3_TICK = function(handle, _node)
     -- Non-city bins only. If the PLC well-source meter DROPS (< PLC_LOW_GPM) while
     -- the smooth Hunter is STILL FLOWING (>= HUN_FLOW_GPM), the meter/filter is
     -- sand-fouled — delivery is fine (Hunter proves it), so a low upstream reading
-    -- is the meter, not a real flow loss → ONE CLEAN_FILTER, NO skip (don't
-    -- interrupt a watering step). Shares the filter-clean cooldown with the
+    -- is the meter, not a real flow loss → 15-min 1:39 wait recharge THEN CLEAN_FILTER
+    -- (Glenn 2026-06-29), NO skip (don't interrupt a watering step). Shares the
+    -- filter-clean cooldown with the
     -- flow-deplete recovery below so ONE loading-filter event = ONE clean.
     -- pcall-isolated. Runs for ETO-non-city bins AND the light foul-only non-ETO
     -- non-city arm.
@@ -400,13 +402,25 @@ M.one_shot.KB3_TICK = function(handle, _node)
                         st.arming.bin, tostring(elapsed), math.ceil(rem / 60000))
                 elseif KB3_FOUL_ARM then
                     st.foul_acted[skey] = true
+                    -- CORRECTIVE SEQUENCE (Glenn 2026-06-29): a 15-min 1:39 wait/recharge
+                    -- FIRST, THEN the CLEAN_FILTER — give the well/line a 15-min city
+                    -- recharge to settle and build pressure before the filter is flushed
+                    -- (a backflush against fresh pressure clears the sand better than a
+                    -- clean on a depleted/fouled line). Still NO skip: the station is
+                    -- delivering fine (Hunter flowing), so the current step finishes
+                    -- watering uninterrupted; the wait+clean run AFTER it.
+                    -- rpush order is the REVERSE of run order (the controller rpops the
+                    -- queue tail), so push CLEAN_FILTER FIRST then the wait LAST, making
+                    -- the controller pop [wait -> CLEAN_FILTER].
                     local cok = WsCommand.queue_front(FlowDeplete.CLEAN_FILTER_JOB,
                         { logger = function(m) log(id, "[ws] %s", m) end })
+                    local wok = WsCommand.queue_front(WellDrawdown.WAIT_JOB,
+                        { logger = function(m) log(id, "[ws] %s", m) end })
                     record_clean(st, db)
-                    log(id, "PLC-FOUL ARMED bin=%s min=%s PLC=%.2f HUNTER=%.1f → rpush CLEAN_FILTER(%s) (no skip — run delivering)",
-                        st.arming.bin, tostring(elapsed), plc or 0, hunter or 0, tostring(cok))
+                    log(id, "PLC-FOUL ARMED bin=%s min=%s PLC=%.2f HUNTER=%.1f → rpush wait(15m 1:39)(%s) + CLEAN_FILTER(%s) → pops [wait -> clean] (no skip — run delivering)",
+                        st.arming.bin, tostring(elapsed), plc or 0, hunter or 0, tostring(wok), tostring(cok))
                     local body = string.format(
-                        "🧽 KB3 PLC-METER FOUL — %s\nschedule=%s step=%s minute=%s\nPLC=%.2f GPM (low) but smooth HUNTER=%.1f GPM (still flowing)\n→ well IS delivering; upstream meter/filter sand-fouled → CLEAN_FILTER (run NOT skipped)",
+                        "🧽 KB3 PLC-METER FOUL — %s\nschedule=%s step=%s minute=%s\nPLC=%.2f GPM (low) but smooth HUNTER=%.1f GPM (still flowing)\n→ well IS delivering; upstream meter/filter sand-fouled → 15-min 1:39 recharge THEN CLEAN_FILTER (run NOT skipped)",
                         st.arming.bin, tostring(st.arming.schedule), tostring(st.arming.station_step),
                         tostring(elapsed), plc or 0, hunter or 0)
                     local nok, nerr = push_notify(ps, id, body)
@@ -415,14 +429,14 @@ M.one_shot.KB3_TICK = function(handle, _node)
                         NOTIFY.record(st.notify_db, {
                             ts_ms = now_ms(), level = "YELLOW", source = "KB3", kind = "PLC_FOUL",
                             target = st.arming.bin,
-                            action = string.format("CLEAN_FILTER(%s)", tostring(cok)),
-                            title = string.format("KB3 PLC-meter foul %s — PLC %.2f low, Hunter %.1f flowing → CLEAN_FILTER",
+                            action = string.format("wait(%s)+CLEAN_FILTER(%s)", tostring(wok), tostring(cok)),
+                            title = string.format("KB3 PLC-meter foul %s — PLC %.2f low, Hunter %.1f flowing → wait + CLEAN_FILTER",
                                 st.arming.bin, plc or 0, hunter or 0),
                             body = body,
                         })
                     end
                 else
-                    log(id, "PLC-FOUL [monitor] bin=%s min=%s PLC=%.2f HUNTER=%.1f → WOULD rpush CLEAN_FILTER (KB3_FOUL_ARM off; cooldown_left=%dmin)",
+                    log(id, "PLC-FOUL [monitor] bin=%s min=%s PLC=%.2f HUNTER=%.1f → WOULD rpush wait(15m 1:39) + CLEAN_FILTER (pops [wait -> clean]) (KB3_FOUL_ARM off; cooldown_left=%dmin)",
                         st.arming.bin, tostring(elapsed), plc or 0, hunter or 0,
                         math.ceil(clean_cooldown_remaining_ms(st) / 60000))
                 end
