@@ -1,12 +1,16 @@
 # Live state — LaCima irrigation site
 
 Site-specific facts that change over time. Update on each deploy / field change.
-Last updated: 2026-06-14.
+Last updated: 2026-06-30.
 
 ## Deployed robot
-- Image: `nanodatacenter/irrigation-analytics:0.38-well-arm`.
-- Runs on the Pi (`ssh robot` = 192.168.1.66), container `irrigation-analytics`,
-  dir `/home/pi/farm/irrigation_analytics/`. Self-recovers across reboots.
+- Image: `nanodatacenter/irrigation-analytics:0.67-leak-14-5`.
+- Runs on the Pi (`ssh robot` = 192.168.1.66, hostname `labserver`/Debian 13 after the
+  2026-06-23 SD-card crash+rebuild), container `irrigation-analytics`,
+  dir `/mnt/ssd/farm/irrigation_analytics/` (MOVED off the boot card onto the SSD).
+  Self-recovers across reboots (restart=unless-stopped + docker.service enabled).
+- **DEPLOY via registry push/pull** now (`docker push` then `ssh robot docker pull`),
+  NOT `docker save | ssh load`. Then bump IMAGE_TAG in fleet.env + `bash start.sh`.
 - WSL/bench instance is normally STOPPED. **Never run it armed while the Pi is armed**
   (double-actuate). One armed instance only.
 
@@ -14,11 +18,17 @@ Last updated: 2026-06-14.
 | Knob (in Pi `fleet.env`) | Value | Effect |
 |---|---|---|
 | `SKIP_LIVE` | `1` | controller writes go LIVE (not dry-run) |
-| `KB1_ARM_KILL` | `1` | KB1 overcurrent → CLOSE_MASTER + SKIP |
-| `KB3_ARM_KILL` | `1` | KB3 leak → actuate |
-| `KB3_WELL_ARM` | `1` | well-drawdown → rpush recharge + SKIP (ARMED 2026-06-14, first live run not yet observed) |
-| `FIELD_LOG_ARM` | `1` | field-check action → baseline reset (live-testing) |
-| `KB3_HYDRAULIC_ARM` | absent | divergence/well stay monitor-first |
+| `KB1_ARM_KILL` | `1` | KB1 overcurrent → CLOSE_MASTER + SKIP (IRR_KILL 1.5A non-city/1.8A city, EQ 1.8A) |
+| `KB3_ARM_KILL` | `1` | KB3 leak → SKIP + insert 15-min 1:39 wait. Thresholds: **abs 14 GPM OR base+5 GPM, 4 consec** |
+| `KB3_FLOW_ARM` | `1` | Hunter flow-deplete → SKIP + [wait → CLEAN_FILTER → reinsert] (replaced retired KB3_WELL_ARM) |
+| `KB3_FOUL_ARM` | `1` | PLC-meter sand-foul (PLC<3 while Hunter≥4, non-city) → **15-min 1:39 wait THEN CLEAN_FILTER, NO skip** |
+| `FIELD_LOG_ARM` | `1` | field-check action → baseline reset |
+| `KB1_EQ_KILL_A` | `1.8` | EQ overcurrent kill level |
+| `KB3_HYDRAULIC_ARM` | absent | divergence/well-exhaustion stay monitor-first (monitor-only) |
+
+**Filter-clean is consolidated in kb3** (kb5 retired): both the Hunter-depletion clean and the
+PLC-foul clean share ONE 90-min cooldown (kb3.db kb3_meta). kb3 also RETRO-ARMS on the
+in-progress step at boot (a mid-run restart no longer blinds it).
 
 To DISARM any: set the knob `=0` in Pi `fleet.env` + restart. NOTE: `start.sh` passes a
 hand-listed `-e` env allowlist — a NEW knob must be added there too, or it won't reach
@@ -30,7 +40,14 @@ the container.
   post-fix runs ~8 GPM (was ~11–12 leaking). `repair_leak` logged → watcher cleared the
   watch; baseline re-learning from clean runs.
 - **4:11 = REPAIRED 2026-06-14** (`repair_leak` applied); clean ~6 GPM.
-- **4:9 = internal leak** (also ~6 Ω below same-branch peers = shorted-turns suspect).
+- **4:9 = SOLENOID REPLACED ~2026-06-22** — resolves its old shorted-turns/leak suspicion.
+  (The ETO current curve still shows a small rising-current quirk, but that's on the NEW
+  coil, so not a solenoid fault.)
+- **4:7 = SHORTED-TURNS suspect, confirmed by TWO methods 2026-06-30.** In the 4:1-4:8 cohort
+  (same cable length → common-mode cancels), 4:7 reads ~7% low-R: during-run current +7% vs
+  cable-matched peers AND valve_test `coil_R=39.99 Ω vs 43.0 branch median (−3 Ω)`. Hottest-
+  running of the group. MILD/early (~3 Ω, vs the ~6 Ω that condemned old 4:9). **Glenn
+  field-checking it Thursday 2026-07-02.** Rest of 4:1-4:8 tight at 41-44 Ω.
 - **1:32 = external leak** (~13 GPM, within sensor range → trustworthy +5 flag; watch-listed).
 - **3:11 = sub-floor drip zone, working FINE** — marked `phantom=1` (reads ~0 = no data).
 - **4:4** — watch: 5–15 gallons declining (109→101 post-Thu-fix), maybe a new ~2–3 head clog.
@@ -169,13 +186,13 @@ the container.
     feeds the KB1 kill** — the one-line flush alone won't stop a single frame from acting.
     Verify the fix by confirming the flush executes (a reboot already re-aligned framing,
     so "no spikes" won't prove it).
-- **4:9 shorted-turns NOT supported by solenoid current (2026-06-19).** 4:9 IRR≈1.03 A
-  sits mid-pack among branch-4 peers (4:4 .96, 4:7 .99, 4:11 .97, 4:1 1.05, 4:10 1.10) —
-  shorted turns would read cohort-HIGH. The "~6 Ω below peers" KB2 flag isn't showing in
-  current; recheck KB2 resistance to confirm/refute before treating 4:9 as a coil fault.
+- **(SUPERSEDED) 4:9 shorted-turns** — 4:9 was REPLACED ~06-22; the new analysis target is
+  **4:7** (confirmed shorted-turns by current AND valve_test resistance, see field faults).
 
 ## Site-specific tunings (current production values)
 Well-drawdown detector: `WARMUP_MIN=5`, `PLATEAU_FROM/TO=5/12`, `DRAW_FRAC=0.78`,
 `ONSET_CONSEC=2`, `WINDOW=4`/`WINDOW_HITS=3`, `HUN_DROP=1.5`, `GUARD_REMAIN_MIN=1`,
 `IL_DIV_ABS=3.5`, `IL_SUSTAIN=2`. KB2 R calibration: `V_PSU≈15.4`, offset from null
-channels `3:1`+`4:6`. KB1: IRR_KILL=1.8 A, EQ_KILL=1.2 A. Master `1:43` ≈ 0.46 A.
+channels `3:1`+`4:6`; branch median coil_R ≈ 43 Ω. KB1: IRR_KILL=1.5A non-city/1.8A city,
+EQ_KILL=1.8 A. KB3 leak: abs 14 GPM OR base+5 GPM (`BASELINE_DELTA_GPM`), 4 consec. KB3 foul:
+PLC<3 & Hunter≥4 for 3 consec. Filter-clean shared cooldown 90 min. Master `1:43` ≈ 0.46 A.
