@@ -47,11 +47,10 @@ local M = {}
 -- =========================================================================
 -- Tuneables
 -- =========================================================================
--- Retuned to the filtered-hunter leak spec (Glenn 2026-06-15): 13.5 = the expected
--- MAX filtered flow in the 5-15 window for a FUNCTIONING well; above it = more than
--- a healthy well delivers = leak. Replay-validated: 0 false trips in 125 runs (healthy
--- max 11.9). Catches 4:4 (~14). Lowered from 14 (which missed 4:4 at 14.0).
-M.GPM_THRESHOLD       = 13.5   -- primary: fire if HUNTER > this for N consec min (absolute)
+-- Absolute leak ceiling (Glenn 2026-06-30: 13.5 → 14). Above this = more filtered
+-- flow than a healthy well delivers = leak. (Was 13.5 to catch 4:4 at ~14; Glenn
+-- set it back to a clean 14 GPM absolute.)
+M.GPM_THRESHOLD       = 14.0   -- primary: fire if HUNTER > this for N consec min (absolute)
 -- Secondary (relative) trip — Glenn 2026-06-10. Catches a break/leak that is
 -- abnormally high FOR THIS BIN but still under the absolute 14 (e.g. a 7 GPM
 -- bin pushed to 12 by a coyote-chewed line). Baseline = KB4 v2's per-bin Hunter
@@ -60,10 +59,12 @@ M.GPM_THRESHOLD       = 13.5   -- primary: fire if HUNTER > this for N consec mi
 -- 3 consec min, from the 5-minute mark — armed only once the bin has
 -- >= BASELINE_MIN_N_CLEAN runs so a thin/seeding baseline can't false-trip.
 -- Both trips share the 3-consec gate.
--- Lowered 4→2 (Glenn 2026-06-15): catches sub-ceiling leaks the absolute 13.5 misses
--- — e.g. 4:10 leaks at ~11.9 (under 13.5) but +3.4 over its own baseline. Replay:
--- 0 false trips in 77 healthy runs (every healthy bin stays within +1.5 of its base).
-M.BASELINE_DELTA_GPM    = 2.0   -- secondary: fire if HUNTER > base_hunter + this
+-- Set to +5 (Glenn 2026-06-30: was 2). +2 FALSE-TRIPPED 2:13 on 06-30 — its baseline
+-- had been dragged down to ~6.9 by a week of FILTER-LOADED runs (delivery choked to
+-- ~6-7); once the filter was cleaned, 2:13 recovered to its true ~9 and read +2.1 over
+-- the suppressed baseline = false leak. +5 rides out that baseline-recovery lag (and the
+-- same suppression on other ETO bins) while still catching a genuine break.
+M.BASELINE_DELTA_GPM    = 5.0   -- secondary: fire if HUNTER > base_hunter + this
 M.BASELINE_MIN_N_CLEAN  = 3     -- arm secondary only once >= this many runs collected
 -- WARMUP_MINUTES exists because of SPRINKLER LINE RECHARGE (Glenn 2026-06-09):
 -- When a station starts, the dry/depressurized sprinkler distribution lines
