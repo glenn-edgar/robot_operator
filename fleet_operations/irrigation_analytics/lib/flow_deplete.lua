@@ -18,13 +18,16 @@
 -- prematurely. So we do NOT look at flow until the ramp is over: the steady
 -- window is min 10-15 and we don't judge before JUDGE_FROM.
 --
--- TWO trip paths, both Hunter-only (fire on either, once per step):
+-- THREE trip paths, all Hunter-only (fire on any, once per step):
 --   A. DEPLETION (the "starts to deplete" case): after the steady level is set,
 --      delivery DROPS below DRAW_FRAC of it for ONSET_CONSEC minutes. Catches a
 --      filter loading up / a well fading mid-run. Self-referencing — no baseline.
 --   B. LOW vs clean BASELINE: the steady level sits below TRIP_FRAC of the bin's
 --      known-good kb4v2 baseline. Catches a step low from the start. Needs a
 --      baseline; skipped if absent.
+--   C. ABSOLUTE floor: the steady level is below ABS_FLOOR_GPM outright, regardless
+--      of the baseline. Catches a clogged filter when B's baseline is suppressed by
+--      prior filter-loaded runs (the 4:10/4:11 06-06 miss). Baseline-independent.
 --
 -- RECOVERY ACTION (dispatched by the kb3 call site when KB3_FLOW_ARM) — Glenn
 -- 2026-06-21 "i believe the filter is bad", so the recovery cleans the filter and
@@ -58,6 +61,16 @@ M.MIN_N            = 3     -- need this many steady-window samples before judgin
 M.TRIP_FRAC        = 0.75  -- (B) steady delivery below this fraction of clean baseline
 M.DRAW_FRAC        = 0.78  -- (A) delivery below this fraction of its OWN steady = depleting
 M.ONSET_CONSEC     = 2     -- (A) consecutive minutes below DRAW_FRAC before it counts
+-- (C) ABSOLUTE low-flow floor (Glenn 2026-07-07). Fire if the steady delivery is grossly
+-- low in ABSOLUTE terms, regardless of the (possibly suppressed) baseline. WHY: a clogged
+-- filter throttled 4:10/4:11 to 3.7-4.6 GPM on 07-06, but their kb4v2 baselines had been
+-- dragged DOWN by prior filter-loaded runs, so Path B's relative trip (< 0.75×base) was
+-- fooled and never fired (the mirror of the 2:13 false-LEAK: a suppressed baseline
+-- false-trips leaks AND misses clogs). Healthy ETO well bins deliver 6-9 GPM, so anything
+-- steady below this floor is starved/clogged. Baseline-INDEPENDENT on purpose. Env
+-- KB3_FLOW_ABS_FLOOR_GPM. (If a bin ever legitimately delivers < floor it needs excluding,
+-- like the sub-floor phantom bins — none of the ETO well bins do.)
+M.ABS_FLOOR_GPM    = 5.0
 M.GUARD_REMAIN_MIN = 1     -- don't act if the step is <= this from completing
 
 local function median(t)
@@ -120,11 +133,16 @@ function M.observe(state, hunter, elapsed, opts)
     if state.drop_consec >= M.ONSET_CONSEC then deplete = true end
     -- PATH B — low vs the bin's known-good baseline
     local low_base = (out.ratio ~= nil and out.ratio < M.TRIP_FRAC)
+    -- PATH C — ABSOLUTE floor (baseline-independent; catches a clogged filter when the
+    -- baseline is suppressed and Path B is fooled — see M.ABS_FLOOR_GPM).
+    local abs_low = state.steady < M.ABS_FLOOR_GPM
 
-    if not (deplete or low_base) then out.reason = "ok"; return out end
+    if not (deplete or low_base or abs_low) then out.reason = "ok"; return out end
 
     out.below  = true
-    out.reason = deplete and "deplete(drop-from-steady)" or "low_vs_baseline"
+    out.reason = deplete and "deplete(drop-from-steady)"
+              or low_base and "low_vs_baseline"
+              or "abs_low(clogged/starved)"
 
     local remain = opts.run_time and (opts.run_time - elapsed) or 99
     out.guard_ok = remain > M.GUARD_REMAIN_MIN
@@ -134,8 +152,8 @@ function M.observe(state, hunter, elapsed, opts)
     state.triggered   = true
     out.would_trigger = true
     -- onset for the retry length: Path A → when the drop streak began (delivery
-    -- started degrading); Path B (low-from-start) → 0, the run never delivered so
-    -- re-run the whole step.
+    -- started degrading); Path B/C (low-from-start) → 0, the run under-delivered the
+    -- whole time so re-run the whole step.
     out.onset_min = deplete and (state.onset_min or elapsed) or 0
     return out
 end

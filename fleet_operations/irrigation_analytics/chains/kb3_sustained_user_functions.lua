@@ -62,6 +62,9 @@ if os.getenv("KB3_HUN_FLOW_GPM") then
     PlcFilter.HUN_FLOW_GPM    = v   -- "Hunter still flowing" for the foul detector
     KB3.WELL_HUNTER_FLOOR_GPM = v   -- same threshold suppresses false WELL_EXHAUSTION
 end
+if os.getenv("KB3_FLOW_ABS_FLOOR_GPM") then
+    FlowDeplete.ABS_FLOOR_GPM = tonumber(os.getenv("KB3_FLOW_ABS_FLOOR_GPM"))
+end
 -- SHARED filter-clean rate-gate (ms). BOTH the flow-deplete recovery and the
 -- PLC-foul clean consult + update kb3.db kb3_meta.last_clean_ms through this, so
 -- one loading-filter event produces ONE clean, not two (Glenn 2026-06-28).
