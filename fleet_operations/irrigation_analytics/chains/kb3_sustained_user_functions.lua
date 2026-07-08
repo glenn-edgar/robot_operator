@@ -31,6 +31,7 @@ local WsCommand     = require("ws_command")
 local WellDrawdown  = require("well_drawdown")   -- kept only for WAIT_JOB (the 1:39 recharge)
 local FlowDeplete   = require("flow_deplete")    -- unified Hunter-only flow-depletion detector
 local PlcFilter     = require("plc_filter")      -- PLC-meter sand-foul detector (folded in from kb5, 2026-06-28)
+local FlowStep      = require("flow_step")       -- flow step-change leak-watch (Glenn 2026-07-08)
 local StateClassifier = require("state_classifier")  -- ACTIVE_RUN test for the boot retro-arm
 local app_heartbeat = require("app_heartbeat")
 
@@ -70,6 +71,15 @@ end
 -- one loading-filter event produces ONE clean, not two (Glenn 2026-06-28).
 local FILTER_CLEAN_COOLDOWN_MS =
     (tonumber(os.getenv("KB3_FILTER_COOLDOWN_MIN") or "90")) * 60 * 1000
+
+-- Flow step-change leak-watch (Glenn 2026-07-08). ALERT-ONLY: on each ETO STATION_START,
+-- compare the bin's recent per-run delivery to its prior runs; a sustained step UP =
+-- a small developing leak the gross 14/+5 trips miss (the 4:4/1:39 case). Default ON
+-- (it never actuates). De-dup re-alerting to once per bin per this window.
+local KB3_FLOWSTEP_ARM = (os.getenv("KB3_FLOWSTEP_ARM") ~= "0")   -- default ON
+if os.getenv("KB3_FLOWSTEP_GPM") then FlowStep.STEP_GPM = tonumber(os.getenv("KB3_FLOWSTEP_GPM")) end
+local FLOWSTEP_DEDUP_MS =
+    (tonumber(os.getenv("KB3_FLOWSTEP_DEDUP_MIN") or "720")) * 60 * 1000   -- 12 h
 
 local M = { main = {}, one_shot = {}, boolean = {} }
 
@@ -124,6 +134,35 @@ local function push_notify(ps, id, body)
     return ok, err
 end
 
+-- Flow step-change leak-watch — run once per ETO STATION_START. Reads the bin's completed-
+-- run delivery history from kb4v2 and alerts (YELLOW, no actuation) if it has stepped UP and
+-- held — a developing leak below the gross-leak thresholds. De-duped per bin.
+local function check_flow_step(st, id, ps, bin_key)
+    if not (KB3_FLOWSTEP_ARM and st.kb4v2_db and st.db) then return end
+    local series = KB4V2.load_hunter_series(st.kb4v2_db, bin_key, FlowStep.RECENT_N + FlowStep.PRIOR_N)
+    local r = FlowStep.detect(series)
+    if not r.stepped_up then return end
+    local last = KB3.get_flow_step_alert_ms(st.db, bin_key)
+    if last and last > 0 and (now_ms() - last) < FLOWSTEP_DEDUP_MS then return end  -- de-dup
+    KB3.set_flow_step_alert(st.db, bin_key, now_ms(), r.delta_gpm)
+    log(id, "FLOW-STEP-UP bin=%s +%.1f GPM (recent %.1f vs prior %.1f) — possible developing leak (alert-only)",
+        bin_key, r.delta_gpm, r.recent_med, r.prior_med)
+    local body = string.format(
+        "📈 KB3 FLOW STEP-UP — %s\nrun-to-run delivery stepped UP +%.1f GPM (recent ~%.1f vs prior ~%.1f) and held\n→ possible DEVELOPING LEAK below the gross-leak thresholds (14 / +5). Check the line.\n(alert-only, NOT skipped; could also be a repair / pressure change / clog recovery)",
+        bin_key, r.delta_gpm, r.recent_med, r.prior_med)
+    local nok, nerr = push_notify(ps, id, body)
+    if not nok then log(id, "Discord push FAILED: %s", tostring(nerr)) end
+    if st.notify_db then
+        NOTIFY.record(st.notify_db, {
+            ts_ms = now_ms(), level = "YELLOW", source = "KB3", kind = "FLOW_STEP_UP",
+            target = bin_key, action = "(alert-only)",
+            title = string.format("KB3 flow step-up %s — +%.1f GPM (%.1f vs %.1f), possible developing leak",
+                bin_key, r.delta_gpm, r.recent_med, r.prior_med),
+            body = body,
+        })
+    end
+end
+
 M.one_shot.KB3_TICK = function(handle, _node)
     local bb       = handle.blackboard
     local id, ps   = bb._identity, bb._pubsub
@@ -176,6 +215,9 @@ M.one_shot.KB3_TICK = function(handle, _node)
             tostring(KB3_FLOW_ARM), tostring(KB3_FOUL_ARM),
             PlcFilter.PLC_LOW_GPM, PlcFilter.HUN_FLOW_GPM, PlcFilter.ONSET_CONSEC,
             FILTER_CLEAN_COOLDOWN_MS / 60000, tostring(st.last_clean_ms))
+        log(id, "flow step-watch: arm=%s step>=%.1f GPM (recent %d vs prior %d runs, alert-only, dedup %dmin) + flow-deplete abs floor %.1f GPM",
+            tostring(KB3_FLOWSTEP_ARM), FlowStep.STEP_GPM, FlowStep.RECENT_N, FlowStep.PRIOR_N,
+            FLOWSTEP_DEDUP_MS / 60000, FlowDeplete.ABS_FLOOR_GPM)
     end
     local db = st.db
 
@@ -293,6 +335,9 @@ M.one_shot.KB3_TICK = function(handle, _node)
                         baseline_gpm = med
                     end
                 end
+
+                -- flow step-change leak-watch (alert-only, pcall-isolated)
+                pcall(check_flow_step, st, id, ps, bin_key)
 
                 st.arming = {
                     bin           = bin_key,

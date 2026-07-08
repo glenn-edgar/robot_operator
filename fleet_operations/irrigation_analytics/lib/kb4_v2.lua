@@ -363,6 +363,23 @@ function M.load_hunter_baseline(db, bin, n)
     return median, #vals
 end
 
+-- load_hunter_series(db, bin, n) — the last n per-run win_hunter values, NEWEST FIRST
+-- (the sequence, not a median). For the flow step-change leak-watch (lib/flow_step.lua),
+-- which compares recent runs to prior runs to spot a sustained shift up.
+function M.load_hunter_series(db, bin, n)
+    if not db or not bin then return {} end
+    local vals = {}
+    pcall(function()
+        for r in db:nrows(string.format(
+                "SELECT win_hunter_gpm AS v FROM runs_kb4v2 "
+                .. "WHERE bin = %q AND win_hunter_gpm IS NOT NULL "
+                .. "ORDER BY ts_ms DESC LIMIT %d", bin, n or 8)) do
+            vals[#vals + 1] = r.v
+        end
+    end)
+    return vals   -- newest first
+end
+
 local cjson_ok, cjson = pcall(require, "cjson")
 local function encode_ring(r) if cjson_ok then return cjson.encode(r or {}) end return "[]" end
 local function decode_ring(s)

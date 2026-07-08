@@ -370,6 +370,14 @@ CREATE TABLE IF NOT EXISTS kb3_meta (
     key TEXT PRIMARY KEY,
     val INTEGER
 );
+
+-- Flow step-change leak-watch de-dup (lib/flow_step.lua). One row per bin that has
+-- stepped up; last_alert_ms gates re-alerting (else it fires every run the step persists).
+CREATE TABLE IF NOT EXISTS flow_step_state (
+    bin           TEXT PRIMARY KEY,
+    last_alert_ms INTEGER,
+    last_delta    REAL
+);
 ]]
 
 function M.open_db(path)
@@ -403,6 +411,26 @@ function M.set_last_clean_ms(db, ts_ms)
         "INSERT OR REPLACE INTO kb3_meta(key,val) VALUES('last_clean_ms',?)")
     if not stmt then return nil, db:errmsg() end
     stmt:bind_values(tonumber(ts_ms) or 0)
+    stmt:step()
+    stmt:finalize()
+    return true
+end
+
+-- Flow step-change leak-watch de-dup: last alert time for a bin (0 if never).
+function M.get_flow_step_alert_ms(db, bin)
+    local v = 0
+    for row in db:nrows("SELECT last_alert_ms FROM flow_step_state WHERE bin=" ..
+                        string.format("%q", bin)) do
+        v = tonumber(row.last_alert_ms) or 0
+    end
+    return v
+end
+
+function M.set_flow_step_alert(db, bin, ts_ms, delta)
+    local stmt = db:prepare(
+        "INSERT OR REPLACE INTO flow_step_state(bin,last_alert_ms,last_delta) VALUES(?,?,?)")
+    if not stmt then return nil, db:errmsg() end
+    stmt:bind_values(bin, tonumber(ts_ms) or 0, tonumber(delta) or 0)
     stmt:step()
     stmt:finalize()
     return true
