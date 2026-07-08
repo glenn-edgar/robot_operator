@@ -211,7 +211,7 @@ M.one_shot.KB3_TICK = function(handle, _node)
             db_path, tostring(KB3_ARM_KILL),
             KB3.GPM_THRESHOLD, KB3.WARMUP_MINUTES, KB3.CONSECUTIVE_REQUIRED,
             KB3.BASELINE_DELTA_GPM, KB3.BASELINE_MIN_N_CLEAN)
-        log(id, "filter cleans: flow_arm=%s foul_arm=%s (PLC<%.1f & smooth HUNTER>=%.1f for %d consec → wait+CLEAN_FILTER, no skip), shared cooldown=%dmin last_clean=%s",
+        log(id, "filter cleans: flow_arm=%s foul_arm=%s (PLC<%.1f & smooth HUNTER>=%.1f for %d consec = well inactive/city-carried → SKIP+wait+CLEAN_FILTER+re-run remaining on well), shared cooldown=%dmin last_clean=%s",
             tostring(KB3_FLOW_ARM), tostring(KB3_FOUL_ARM),
             PlcFilter.PLC_LOW_GPM, PlcFilter.HUN_FLOW_GPM, PlcFilter.ONSET_CONSEC,
             FILTER_CLEAN_COOLDOWN_MS / 60000, tostring(st.last_clean_ms))
@@ -421,16 +421,18 @@ M.one_shot.KB3_TICK = function(handle, _node)
     local hunter  = tonumber(popup.FILTERED_HUNTER_VALVE)
 
     -- ===================================================================
-    -- PLC-METER SAND-FOUL clean (folded in from kb5, Glenn 2026-06-28).
-    -- Non-city bins only. If the PLC well-source meter DROPS (< PLC_LOW_GPM) while
-    -- the smooth Hunter is STILL FLOWING (>= HUN_FLOW_GPM), the meter/filter is
-    -- sand-fouled — delivery is fine (Hunter proves it), so a low upstream reading
-    -- is the meter, not a real flow loss → 15-min 1:39 wait recharge THEN CLEAN_FILTER
-    -- (Glenn 2026-06-29), NO skip (don't interrupt a watering step). Shares the
-    -- filter-clean cooldown with the
-    -- flow-deplete recovery below so ONE loading-filter event = ONE clean.
-    -- pcall-isolated. Runs for ETO-non-city bins AND the light foul-only non-ETO
-    -- non-city arm.
+    -- WELL-INACTIVE / PLC-METER SAND-FOUL — CITY-WATER MONITOR (Glenn 2026-07-08).
+    -- Non-city bins only. Glenn's source model: well water = PLC_FLOW_METER, city water =
+    -- FILTERED_HUNTER. When the PLC (well) reads low (< PLC_LOW_GPM) while the smooth Hunter
+    -- (delivery) is STILL FLOWING (>= HUN_FLOW_GPM), the run is coasting on CITY water, not
+    -- the well. OBJECTIVE: keep WELL water active. So — upgraded from the old no-skip
+    -- wait+clean (Glenn confirmed 2026-07-08 "yes") — do the SAME recovery as flow-deplete:
+    -- SKIP the current step and re-run its REMAINING time on the well after a recharge +
+    -- clean. This makes the zone's remainder come off the (free) well instead of (paid) city.
+    -- Total dose is unchanged (elapsed + remaining = run_time), so no over-water. Skip + wait
+    -- + reinsert ALWAYS happen; CLEAN is gated on the SHARED filter-clean cooldown (ONE
+    -- loading-filter event = ONE clean). Anti-loop shared with flow-deplete (one recovery per
+    -- step). pcall-isolated. Runs for ETO-non-city bins AND the foul-only non-ETO non-city arm.
     if elapsed and st.arming.plc_state and not st.arming.is_city
        and st.arming.foul_last_min ~= elapsed then
         st.arming.foul_last_min = elapsed
@@ -439,53 +441,70 @@ M.one_shot.KB3_TICK = function(handle, _node)
                 { run_time = st.arming.run_time })
             if r.would_trigger then
                 local skey = tostring(st.arming.schedule or "") .. ":" .. tostring(st.arming.station_step or "")
-                if st.foul_acted[skey] then
-                    log(id, "plc-foul bin=%s step=%s already cleaned once → NOT re-acting (%s)",
+                -- shared anti-loop with flow-deplete: whichever fired first for this step wins
+                if st.foul_acted[skey] or st.flow_acted[skey] then
+                    log(id, "plc-foul bin=%s step=%s recovery already ran once → NOT re-acting (%s)",
                         st.arming.bin, tostring(st.arming.station_step), tostring(r.reason))
                     return
                 end
-                local rem = clean_cooldown_remaining_ms(st)
-                if rem > 0 and KB3_FOUL_ARM then
-                    log(id, "PLC-FOUL bin=%s min=%s — shared clean COOLDOWN (%d min left) → NOT cleaning",
-                        st.arming.bin, tostring(elapsed), math.ceil(rem / 60000))
-                elseif KB3_FOUL_ARM then
+                local full_rt      = tonumber(st.arming.run_time) or 0
+                local remaining_rt = math.max(1, full_rt - (tonumber(elapsed) or 0))
+                -- byte-matched reinsert job for THIS step's REMAINING time (re-run on well
+                -- after the wait+clean). Same builder the flow-deplete recovery uses.
+                local reinsert = FlowDeplete.reinsert_job({
+                    schedule = st.arming.schedule, step = st.arming.station_step,
+                    io_setup = st.arming.io_setup, run_time = remaining_rt })
+                if KB3_FOUL_ARM then
                     st.foul_acted[skey] = true
-                    -- CORRECTIVE SEQUENCE (Glenn 2026-06-29): a 15-min 1:39 wait/recharge
-                    -- FIRST, THEN the CLEAN_FILTER — give the well/line a 15-min city
-                    -- recharge to settle and build pressure before the filter is flushed
-                    -- (a backflush against fresh pressure clears the sand better than a
-                    -- clean on a depleted/fouled line). Still NO skip: the station is
-                    -- delivering fine (Hunter flowing), so the current step finishes
-                    -- watering uninterrupted; the wait+clean run AFTER it.
-                    -- rpush order is the REVERSE of run order (the controller rpops the
-                    -- queue tail), so push CLEAN_FILTER FIRST then the wait LAST, making
-                    -- the controller pop [wait -> CLEAN_FILTER].
-                    local cok = WsCommand.queue_front(FlowDeplete.CLEAN_FILTER_JOB,
+                    -- reverse rpush (controller pops the tail): reinsert, [CLEAN if the shared
+                    -- cooldown is clear], wait → pops [wait -> (CLEAN) -> re-run remaining on
+                    -- well]; then SKIP_STATION ends the city-carried step. Skip + wait +
+                    -- reinsert ALWAYS happen; only the CLEAN is cooldown-gated.
+                    local clean_rem = clean_cooldown_remaining_ms(st)
+                    local do_clean  = clean_rem <= 0
+                    local rok = WsCommand.queue_front(reinsert,
                         { logger = function(m) log(id, "[ws] %s", m) end })
+                    local clean_desc
+                    if do_clean then
+                        local cok = WsCommand.queue_front(FlowDeplete.CLEAN_FILTER_JOB,
+                            { logger = function(m) log(id, "[ws] %s", m) end })
+                        record_clean(st, db)
+                        clean_desc = string.format("rpush CLEAN_FILTER(%s)", tostring(cok))
+                    else
+                        clean_desc = string.format("CLEAN_FILTER(skipped: %dmin shared cooldown)",
+                            math.ceil(clean_rem / 60000))
+                    end
                     local wok = WsCommand.queue_front(WellDrawdown.WAIT_JOB,
                         { logger = function(m) log(id, "[ws] %s", m) end })
-                    record_clean(st, db)
-                    log(id, "PLC-FOUL ARMED bin=%s min=%s PLC=%.2f HUNTER=%.1f → rpush wait(15m 1:39)(%s) + CLEAN_FILTER(%s) → pops [wait -> clean] (no skip — run delivering)",
-                        st.arming.bin, tostring(elapsed), plc or 0, hunter or 0, tostring(wok), tostring(cok))
+                    local sok = WsCommand.post("SKIP_STATION", {
+                        schedule_name = st.arming.schedule or "",
+                        step          = tostring(st.arming.station_step or ""),
+                        logger        = function(m) log(id, "[ws] %s", m) end })
+                    log(id, "PLC-FOUL ARMED bin=%s min=%s PLC=%.2f HUNTER=%.1f (well inactive, city-carried) → rpush reinsert(%s rt=%d/%d) + %s + rpush wait(%s) + SKIP(%s) → pops [wait -> clean -> re-run remaining on well]",
+                        st.arming.bin, tostring(elapsed), plc or 0, hunter or 0,
+                        tostring(rok), remaining_rt, full_rt, clean_desc, tostring(wok), tostring(sok))
                     local body = string.format(
-                        "🧽 KB3 PLC-METER FOUL — %s\nschedule=%s step=%s minute=%s\nPLC=%.2f GPM (low) but smooth HUNTER=%.1f GPM (still flowing)\n→ well IS delivering; upstream meter/filter sand-fouled → 15-min 1:39 recharge THEN CLEAN_FILTER (run NOT skipped)",
+                        "🚰 KB3 WELL INACTIVE (city-carried) — %s\nschedule=%s step=%s minute=%s\nPLC(well)=%.2f GPM low while HUNTER(city)=%.1f still delivering → run coasting on CITY water.\n→ keep WELL active: SKIP + 15-min recharge + %s + re-run remaining %d min on well",
                         st.arming.bin, tostring(st.arming.schedule), tostring(st.arming.station_step),
-                        tostring(elapsed), plc or 0, hunter or 0)
+                        tostring(elapsed), plc or 0, hunter or 0,
+                        do_clean and "CLEAN_FILTER" or "(clean on cooldown)", remaining_rt)
                     local nok, nerr = push_notify(ps, id, body)
                     if not nok then log(id, "Discord push FAILED: %s", tostring(nerr)) end
                     if st.notify_db then
                         NOTIFY.record(st.notify_db, {
                             ts_ms = now_ms(), level = "YELLOW", source = "KB3", kind = "PLC_FOUL",
                             target = st.arming.bin,
-                            action = string.format("wait(%s)+CLEAN_FILTER(%s)", tostring(wok), tostring(cok)),
-                            title = string.format("KB3 PLC-meter foul %s — PLC %.2f low, Hunter %.1f flowing → wait + CLEAN_FILTER",
-                                st.arming.bin, plc or 0, hunter or 0),
+                            action = string.format("SKIP(%s)+wait(%s)+%s+reinsert(%s,%dmin)",
+                                tostring(sok), tostring(wok), do_clean and "CLEAN" or "no-clean",
+                                tostring(rok), remaining_rt),
+                            title = string.format("KB3 well-inactive %s — PLC %.2f low, Hunter %.1f (city) → skip+recharge+clean+re-run %dmin on well",
+                                st.arming.bin, plc or 0, hunter or 0, remaining_rt),
                             body = body,
                         })
                     end
                 else
-                    log(id, "PLC-FOUL [monitor] bin=%s min=%s PLC=%.2f HUNTER=%.1f → WOULD rpush wait(15m 1:39) + CLEAN_FILTER (pops [wait -> clean]) (KB3_FOUL_ARM off; cooldown_left=%dmin)",
-                        st.arming.bin, tostring(elapsed), plc or 0, hunter or 0,
+                    log(id, "PLC-FOUL [monitor] bin=%s min=%s PLC=%.2f HUNTER=%.1f → WOULD rpush reinsert(%dmin) + CLEAN_FILTER + wait + SKIP (keep well active) (KB3_FOUL_ARM off; cooldown_left=%dmin)",
+                        st.arming.bin, tostring(elapsed), plc or 0, hunter or 0, remaining_rt,
                         math.ceil(clean_cooldown_remaining_ms(st) / 60000))
                 end
             elseif r.below then
@@ -543,8 +562,9 @@ M.one_shot.KB3_TICK = function(handle, _node)
                 -- reinserted run finish — a real clog/drawdown recovers after one; a
                 -- step still depleting after that is the head/valve, not flow.
                 local skey = tostring(st.arming.schedule or "") .. ":" .. tostring(st.arming.station_step or "")
-                if st.flow_acted[skey] then
-                    log(id, "flow-deplete bin=%s step=%s already acted once → NOT re-acting (anti-loop; %s)",
+                -- shared anti-loop with the PLC-foul/well-inactive recovery above
+                if st.flow_acted[skey] or st.foul_acted[skey] then
+                    log(id, "flow-deplete bin=%s step=%s recovery already ran once → NOT re-acting (anti-loop; %s)",
                         st.arming.bin, tostring(st.arming.station_step), tostring(r.reason))
                     return
                 end
