@@ -1,10 +1,11 @@
 # Live state — LaCima irrigation site
 
 Site-specific facts that change over time. Update on each deploy / field change.
-Last updated: 2026-06-30.
+Last updated: 2026-07-08.
 
 ## Deployed robot
-- Image: `nanodatacenter/irrigation-analytics:0.67-leak-14-5`.
+- Image: `nanodatacenter/irrigation-analytics:0.70-well-active`
+  (lineage: 0.67-leak-14-5 → 0.68-flow-absfloor → 0.69-flow-stepwatch → 0.70-well-active).
 - Runs on the Pi (`ssh robot` = 192.168.1.66, hostname `labserver`/Debian 13 after the
   2026-06-23 SD-card crash+rebuild), container `irrigation-analytics`,
   dir `/mnt/ssd/farm/irrigation_analytics/` (MOVED off the boot card onto the SSD).
@@ -20,8 +21,9 @@ Last updated: 2026-06-30.
 | `SKIP_LIVE` | `1` | controller writes go LIVE (not dry-run) |
 | `KB1_ARM_KILL` | `1` | KB1 overcurrent → CLOSE_MASTER + SKIP (IRR_KILL 1.5A non-city/1.8A city, EQ 1.8A) |
 | `KB3_ARM_KILL` | `1` | KB3 leak → SKIP + insert 15-min 1:39 wait. Thresholds: **abs 14 GPM OR base+5 GPM, 4 consec** |
-| `KB3_FLOW_ARM` | `1` | Hunter flow-deplete → SKIP + [wait → CLEAN_FILTER → reinsert] (replaced retired KB3_WELL_ARM) |
-| `KB3_FOUL_ARM` | `1` | PLC-meter sand-foul (PLC<3 while Hunter≥4, non-city) → **15-min 1:39 wait THEN CLEAN_FILTER, NO skip** |
+| `KB3_FLOW_ARM` | `1` | Hunter flow-deplete → SKIP + [wait → CLEAN_FILTER → reinsert]. 3 paths: deplete-from-steady, low-vs-baseline, **abs floor < 5.0 GPM (0.68)** catches clogs a suppressed baseline hides |
+| `KB3_FOUL_ARM` | `1` | **CITY-WATER MONITOR / keep-well-active (0.70):** PLC(well)<3 while Hunter(city)≥4, non-city = run coasting on city → **SKIP + wait 15 + CLEAN_FILTER + re-run REMAINING on well** (was: no-skip wait+clean). Total dose unchanged; remainder off free well not paid city. **Watch schedule churn.** |
+| `KB3_FLOWSTEP_ARM` | `1` | **flow step-watch (0.69), ALERT-ONLY:** per-run delivery step-up ≥1.5 GPM sustained = small developing leak the 14/+5 trips miss → YELLOW `FLOW_STEP_UP`, no actuation. `KB3_FLOWSTEP_GPM` tunes it. |
 | `FIELD_LOG_ARM` | `1` | field-check action → baseline reset |
 | `KB1_EQ_KILL_A` | `1.8` | EQ overcurrent kill level |
 | `KB3_HYDRAULIC_ARM` | absent | divergence/well-exhaustion stay monitor-first (monitor-only) |
@@ -40,15 +42,30 @@ the container.
   post-fix runs ~8 GPM (was ~11–12 leaking). `repair_leak` logged → watcher cleared the
   watch; baseline re-learning from clean runs.
 - **4:11 = REPAIRED 2026-06-14** (`repair_leak` applied); clean ~6 GPM.
-- **4:9 = SOLENOID REPLACED ~2026-06-22** — resolves its old shorted-turns/leak suspicion.
-  (The ETO current curve still shows a small rising-current quirk, but that's on the NEW
-  coil, so not a solenoid fault.)
-- **4:7 = SHORTED-TURNS suspect, confirmed by TWO methods 2026-06-30.** In the 4:1-4:8 cohort
-  (same cable length → common-mode cancels), 4:7 reads ~7% low-R: during-run current +7% vs
-  cable-matched peers AND valve_test `coil_R=39.99 Ω vs 43.0 branch median (−3 Ω)`. Hottest-
-  running of the group. MILD/early (~3 Ω, vs the ~6 Ω that condemned old 4:9). **Glenn
-  field-checking it Thursday 2026-07-02.** Rest of 4:1-4:8 tight at 41-44 Ω.
+- **VALVE COIL HEALTH — full current+resistance sweep 2026-07-08** (details in auto-memory
+  [[valve-health-findings-2026-07-08]]). Method: coil current = IRRIGATION_CURRENT steady −
+  master; **master = valve 1:40 (~0.42-0.44 A, ALWAYS ON, gates the WELL); city water = 1:39.**
+  Analyze by CABLE GROUP (same length → same baseline; lower-numbered banks draw more,
+  4:1-8 > 4:9-15). Resistance = valve_test hash (per-valve time-series); warming is ADDITIVE
+  (~+0.05 fleet-wide) so use ABSOLUTE change vs fleet, NOT ratio. Field-check priority:
+  - **4:9 = ACTIVELY SHORTING (top).** The replaced coil is degrading: rising current
+    (+0.013 drift), resistance rising only +0.018 vs fleet +0.053 (R dropping *relative* to
+    the warming = shorting turns). Three signals agree. (SUPERSEDES the old "replaced, resolved.")
+  - **3:2 = developing HIGH-R in its OWN leg.** Resistance step-jumped +0.10 and held (+0.091
+    vs fleet). Runs with **4:12**, which warms normally → fault is 3:2's own coil/branch, NOT
+    the shared feed. Field target: 3:2 solenoid + its lug, not the common cable.
+  - **1:1 = mid-run current COLLAPSE (thermal).** Holds ~0.84 A for 2 min then drops to ~0.52
+    every run; static R normal → sustained-thermal dropout. Confirm it's a normal solenoid
+    (not an economizer type) before repair.
+  - **4:7 = STABLE low-R, elective (downgraded).** Still ~3 Ω low + hottest in 4:1-8, but
+    resistance trend is NORMAL (+0.056 ≈ fleet) = already-shorted but NOT worsening.
 - **1:32 = external leak** (~13 GPM, within sensor range → trustworthy +5 flag; watch-listed).
+- **3:5 = REAL LEAK (2026-07-08), NEEDS REPAIR.** Jumped from a stable ~7.5 GPM (8-day) to
+  13.0 (+5.4 over base 7.62) → KB3 RED LEAK fired 13:14, SKIP+recharge. Coil current is fine —
+  it's a pipe/flow leak (coyote-pipe class). Field target: 3:5 line.
+- **4:4 = SLOW DEVELOPING LEAK (2026-07-08), NEEDS REPAIR.** Delivery stepped ~10→~12.3 around
+  07-05, held 4 runs (+2). Sub-threshold (under 14 and under +5) so the gross leak trip missed
+  it — caught by the new FLOW_STEP_UP watch. Field target: 4:4 line.
 - **3:11 = sub-floor drip zone, working FINE** — marked `phantom=1` (reads ~0 = no data).
 - **4:4** — watch: 5–15 gallons declining (109→101 post-Thu-fix), maybe a new ~2–3 head clog.
 
