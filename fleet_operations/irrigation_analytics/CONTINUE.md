@@ -28,8 +28,8 @@ Companion memory: `irrigation-production-state`, `valve-health-findings-2026-07-
 
 ### Field maintenance 2026-07-09
 - **1:1 → 1:18** (fresh 43Ω solenoid) — DONE, verified flat. 1:18 = shrubbery zone (non-ETO).
-- **4:9 solenoid replaced (2nd time)** — VERIFY PENDING (new coil flat so far; bg watcher for
-  full-run drift + multi-day resistance-vs-fleet).
+- **4:9 solenoid replaced (2nd time)** — CURRENT-SIDE VERIFIED HEALTHY: first full 58-min post-swap
+  run drift **−0.020 (cooling)** vs old coil +0.013 rising. Still TBV: resistance-vs-fleet over days.
 - **4:7 = planned replacement next** (elective; should read LOW ~40Ω cold — a static short).
 - **⭐ RULE: RISING current through a run = SOLENOID FAILURE** (thermal short reads normal cold:
   bad 4:9 was 43.5Ω cold but shorted hot). Watch within-run drift: rising=bad, flat/neg=healthy.
@@ -41,7 +41,8 @@ Companion memory: `irrigation-production-state`, `valve-health-findings-2026-07-
 1. **NEW GUI PROJECT — kickoff 2026-07-10**: design menu structure → schedule/config tasks. Redis
    stays the contract; strangler-fig; must preserve the `/ajax/mode_change` command API the robot
    uses. Full plan in `new-irrigation-gui-project`.
-2. **4:9 verification** (full-run drift + resistance trend over a few cycles).
+2. **4:9 verification** — current-side DONE (drift −0.020, healthy); only the resistance-vs-fleet
+   trend over a few days remains to fully close it.
 3. **Break-detection tuning**: retune the leak trip to key off each bin's CITY-BACKED baseline
    (city-backed normal ~10-12; abs-14/base+5 were well-only-tuned) — after the reset bins re-learn.
 4. **4:7 replacement** verify when done.
