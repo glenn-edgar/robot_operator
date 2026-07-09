@@ -5,6 +5,49 @@
 > THIS top section. Companion memory: `irrigation-production-state` (the reset
 > runbook).
 
+## ⭐⭐⭐ 2026-07-09 CURRENT STATE (supersedes everything below)
+
+**Image `0.70-well-active`, armed & live on the Pi (`ssh robot`).** kb1 + kb3 all armed.
+Companion memory: `irrigation-production-state`, `valve-health-findings-2026-07-08`,
+`controller-schedules-live-in-redis`, `new-irrigation-gui-project`.
+
+### KB3 detectors (all armed on 0.70)
+- **Leak**: abs 14 GPM OR base+5, 4 consec → SKIP + 15-min recharge.
+- **Flow-deplete + ABS FLOOR 5.0** (0.68): catches a clog a suppressed baseline hides.
+- **CITY-WATER MONITOR / keep-well-active** (0.70): PLC(well) low while Hunter(city) flows →
+  SKIP + wait + CLEAN + re-run REMAINING on well. **WATCH: churns on sand-foul (~4/night)** —
+  candidate to tighten (distinguish real drawdown from a transient foul).
+- **Flow STEP-WATCH** (0.69, ALERT-ONLY): sustained ≥1.5 GPM run-to-run step = developing leak.
+
+### Shipped this session (committed/pushed to robot_operator)
+- 0.68 flow abs-floor · 0.69 flow step-watch · 0.70 city-water well-active monitor.
+- Fixed `No_city_water` schedule: 1:40-master typo → 1:39; removed empty/0-min tail steps that
+  500'd the Flask editor; **SYNCED Redis** (schedules are served from Redis `db=4 [FILE:APP]`
+  msgpack, NOT the .json file — see `controller-schedules-live-in-redis`).
+- Reset baselines for **4:10/4:11/2:15** (repaired pipe-break bins → re-learn city-backed clean).
+
+### Field maintenance 2026-07-09
+- **1:1 → 1:18** (fresh 43Ω solenoid) — DONE, verified flat. 1:18 = shrubbery zone (non-ETO).
+- **4:9 solenoid replaced (2nd time)** — VERIFY PENDING (new coil flat so far; bg watcher for
+  full-run drift + multi-day resistance-vs-fleet).
+- **4:7 = planned replacement next** (elective; should read LOW ~40Ω cold — a static short).
+- **⭐ RULE: RISING current through a run = SOLENOID FAILURE** (thermal short reads normal cold:
+  bad 4:9 was 43.5Ω cold but shorted hot). Watch within-run drift: rising=bad, flat/neg=healthy.
+- **Pipe breaks:** 4:4 + 3:5 FIXED (robot caught both). **4:10(×5)/4:11/2:15 were UNDETECTED**
+  (internal breaks read LOW). Glenn added **CITY-WATER BACKING** (1:39 on every step) so a break
+  draws city water → shows as EXCESS flow. (This is why No_city_water is all-city-backed now.)
+
+### NEXT priorities
+1. **NEW GUI PROJECT — kickoff 2026-07-10**: design menu structure → schedule/config tasks. Redis
+   stays the contract; strangler-fig; must preserve the `/ajax/mode_change` command API the robot
+   uses. Full plan in `new-irrigation-gui-project`.
+2. **4:9 verification** (full-run drift + resistance trend over a few cycles).
+3. **Break-detection tuning**: retune the leak trip to key off each bin's CITY-BACKED baseline
+   (city-backed normal ~10-12; abs-14/base+5 were well-only-tuned) — after the reset bins re-learn.
+4. **4:7 replacement** verify when done.
+
+---
+
 ## ⭐⭐ 2026-06-14 UPDATE — next task: KB3 LEAK CURVE DETECTOR
 Full plan + measured data in the `irrigation-kb3-curve-tracker-plan` memory. In short:
 - A REAL 4:10 pipe break (coyote pipe) went uncaught by KB3 today. Root cause: KB3
