@@ -1,11 +1,11 @@
 # Live state — LaCima irrigation site
 
 Site-specific facts that change over time. Update on each deploy / field change.
-Last updated: 2026-07-08.
+Last updated: 2026-07-13.
 
 ## Deployed robot
-- Image: `nanodatacenter/irrigation-analytics:0.70-well-active`
-  (lineage: 0.67-leak-14-5 → 0.68-flow-absfloor → 0.69-flow-stepwatch → 0.70-well-active).
+- Image: `nanodatacenter/irrigation-analytics:0.72-step-cooldown`
+  (lineage: …0.69-flow-stepwatch → 0.70-well-active → 0.71-sandfoul-city → 0.72-step-cooldown).
 - Runs on the Pi (`ssh robot` = 192.168.1.66, hostname `labserver`/Debian 13 after the
   2026-06-23 SD-card crash+rebuild), container `irrigation-analytics`,
   dir `/mnt/ssd/farm/irrigation_analytics/` (MOVED off the boot card onto the SSD).
@@ -22,21 +22,43 @@ Last updated: 2026-07-08.
 | `KB1_ARM_KILL` | `1` | KB1 overcurrent → CLOSE_MASTER + SKIP (IRR_KILL 1.5A non-city/1.8A city, EQ 1.8A) |
 | `KB3_ARM_KILL` | `1` | KB3 leak → SKIP + insert 15-min 1:39 wait. Thresholds: **abs 14 GPM OR base+5 GPM, 4 consec** |
 | `KB3_FLOW_ARM` | `1` | Hunter flow-deplete → SKIP + [wait → CLEAN_FILTER → reinsert]. 3 paths: deplete-from-steady, low-vs-baseline, **abs floor < 5.0 GPM (0.68)** catches clogs a suppressed baseline hides |
-| `KB3_FOUL_ARM` | `1` | **CITY-WATER MONITOR / keep-well-active (0.70):** PLC(well)<3 while Hunter(city)≥4, non-city = run coasting on city → **SKIP + wait 15 + CLEAN_FILTER + re-run REMAINING on well** (was: no-skip wait+clean). Total dose unchanged; remainder off free well not paid city. **Watch schedule churn.** |
+| `KB3_FOUL_ARM` | `1` | **SAND-CLOG / well-source-low clean (0.71/0.72):** PLC(well)<3 while smooth Hunter≥4 for 3 consec, on **ANY ETO bin (city-backed included)** → **SKIP + wait 15 + CLEAN_FILTER + re-run REMAINING step-time on well**. Uniform city+non-city (Glenn 07-10/13: same action, put the remainder back on the free well). **Cooldown is STEP-based, N=1** (`KB3_FILTER_COOLDOWN_STEPS`) NOT time — backflush EVERY fouled step (a pipe break can exhaust the well). **RULE (final): PLC low → backflush every step; no offline-detection, no city/well suppression.** The `not is_city` gate was the 07-10 "sand-clog did not work" bug (all-city-backed schedule disabled it). |
 | `KB3_FLOWSTEP_ARM` | `1` | **flow step-watch (0.69), ALERT-ONLY:** per-run delivery step-up ≥1.5 GPM sustained = small developing leak the 14/+5 trips miss → YELLOW `FLOW_STEP_UP`, no actuation. `KB3_FLOWSTEP_GPM` tunes it. |
 | `FIELD_LOG_ARM` | `1` | field-check action → baseline reset |
 | `KB1_EQ_KILL_A` | `1.8` | EQ overcurrent kill level |
 | `KB3_HYDRAULIC_ARM` | absent | divergence/well-exhaustion stay monitor-first (monitor-only) |
 
 **Filter-clean is consolidated in kb3** (kb5 retired): both the Hunter-depletion clean and the
-PLC-foul clean share ONE 90-min cooldown (kb3.db kb3_meta). kb3 also RETRO-ARMS on the
-in-progress step at boot (a mid-run restart no longer blinds it).
+PLC-foul clean share ONE **STEP-based cooldown (N=1, in-memory station counter)** — NOT the old
+90-min timer. Flow-deplete (falling Hunter) stays NON-city-only (city masks depletion); the
+PLC-foul (well-meter low) runs on ALL ETO bins. kb3 also RETRO-ARMS on the in-progress step at
+boot (a mid-run restart no longer blinds it).
+
+## PLC SENSOR OFFLINE — 2026-07-11 19:14 → 07-12 15:41 (~20h, resolved)
+The PLC well flow meter read **flat 0 for ~20h** (hardware clean — Glenn checked 15:47; the well
+delivered fine via Hunter 7-10). Equipment current `plc_slave_1` had NO onset fingerprint (only
+stepped 0.6→0.83 at Glenn's 15:35 recovery), so it's NOT an offline detector. **DECISION (Glenn,
+final): no offline-detection / no suppression — PLC low → backflush every step regardless** (0.72
+does this). PLC recovered 07-12 15:48; reading 9-11 healthy since. Backflushes are NOT wasted even
+on a well-off stretch.
 
 To DISARM any: set the knob `=0` in Pi `fleet.env` + restart. NOTE: `start.sh` passes a
 hand-listed `-e` env allowlist — a NEW knob must be added there too, or it won't reach
 the container.
 
 ## Known field faults (open)
+- **2026-07-13 FIELD VERIFICATION (via `New_check` schedule — Glenn built it to check the repairs).**
+  ALL REPAIRS HOLDING: 4:10 8.9, 4:4 10.3, 3:5 8.0, 4:9 9.7 (new solenoid) — healthy 8-11 GPM.
+  Pipe-break repairs (4:4/3:5/4:10/4:11/2:15) + 4:9 coil swap + 1:1→1:18 all verified good.
+  - **4:9 — solenoid replaced (2nd), VERIFIED healthy:** full-run current drift −0.020 (cooling)
+    vs old shorting +0.013. Fault was a THERMAL turn-to-turn short (read normal 43.5Ω cold, shorted
+    hot). **RULE: rising within-run current = solenoid failure** (a cold ohmmeter misses it).
+  - **3:2 — ELECTRICAL high-R in its OWN leg (only open item, NOT urgent):** valve_test 0.588,
+    +0.057 vs fleet, rose +0.032 FASTER than cable-mates 3:1/3:7 (which track fleet) = 3:2-specific
+    (its coil/lug), not the shared feed. Flow is FINE (3:2 is a small ~3.5 GPM zone, now COMBINED
+    with 4:12 → ~6 GPM group). Check 3:2's solenoid connection when next at that manifold.
+  - **4:7 — STABLE, elective:** valve_test 0.568 (+0.037 vs fleet) but warms at its cable-mates'
+    rate (+0.055) = fixed offset, NOT diverging like 3:2. (Confirm whether Glenn replaced it.)
 - **4:10 = pipe break (coyote pipe) — REPAIRED 2026-06-14.** It had been held out, but
   ran 06-14 (steps 33/34) above baseline, over-drew the well. Field-repaired; clean
   post-fix runs ~8 GPM (was ~11–12 leaking). `repair_leak` logged → watcher cleared the

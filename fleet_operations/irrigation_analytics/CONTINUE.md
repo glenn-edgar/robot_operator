@@ -5,7 +5,28 @@
 > THIS top section. Companion memory: `irrigation-production-state` (the reset
 > runbook).
 
-## ⭐⭐⭐ 2026-07-09 CURRENT STATE (supersedes everything below)
+## ⭐⭐⭐ 2026-07-13 CURRENT STATE (supersedes everything below)
+
+**Image `0.72-step-cooldown`, armed & live on the Pi.** Arc since 07-09:
+- **Sand-clog clean FIXED (0.71/0.72).** Glenn's all-city-backed schedule (1:39 on every step, to
+  detect pipe breaks) had disabled the PLC-foul via the `not is_city` gate → "sand-clog did not
+  work". Now: PLC(well)<3 & smooth Hunter≥4 on **ANY ETO bin** → `SKIP + wait(15m) + CLEAN_FILTER
+  + re-run remaining step-time on well`. Cooldown **STEP-based N=1** (`KB3_FILTER_COOLDOWN_STEPS`)
+  — backflush EVERY fouled step (a pipe break can exhaust the well). **RULE (final): PLC low →
+  backflush every step; NO offline-detection, NO city/well suppression.** Flow-deplete stays
+  non-city-only. Committed 7c665a8.
+- **PLC sensor OFFLINE 07-11 19:14 → 07-12 15:41 (~20h), resolved.** Flat 0, hardware clean (Glenn
+  checked 15:47); well delivered via Hunter throughout; recovered 15:48, healthy 9-11 since. No
+  detector added — Glenn's call (backflushes aren't wasted even on a well-off stretch).
+- **Field: ALL repairs HOLDING** (4:10/4:4/3:5 pipe breaks, 4:9 new solenoid, 1:1→1:18) — verified
+  via the `New_check` schedule (Glenn built it to check the fixes). Open item: **3:2 ELECTRICAL
+  high-R** in its own leg (valve_test 0.588, rising +0.032 faster than cable-mates 3:1/3:7) — NOT
+  urgent, flow fine (small zone, combined with 4:12). 4:7 stable/elective.
+- **RULE: rising within-run current = SOLENOID FAILURE** (4:9 was a thermal short: normal 43.5Ω
+  cold, shorted hot — a cold ohmmeter misses it).
+
+---
+## ⭐⭐⭐ 2026-07-09 CURRENT STATE (superseded by the 2026-07-13 section above)
 
 **Image `0.70-well-active`, armed & live on the Pi (`ssh robot`).** kb1 + kb3 all armed.
 Companion memory: `irrigation-production-state`, `valve-health-findings-2026-07-08`,
